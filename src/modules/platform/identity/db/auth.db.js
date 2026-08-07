@@ -44,6 +44,18 @@ const updateVerificationToken = async (id, data) => {
   return prisma.verificationToken.update({ where: { id }, data });
 };
 
+const deleteAllSessionsByUserId = async (userId) => {
+  return prisma.session.deleteMany({ where: { userId } });
+};
+
+const findSessionsByUserId = async (userId) => {
+  return prisma.session.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+  });
+};
+
+
 export default {
   createUser,
   findUserByEmail,
@@ -56,4 +68,6 @@ export default {
   findVerificationToken,
   deleteVerificationToken,
   updateVerificationToken,
+  deleteAllSessionsByUserId,
+  findSessionsByUserId,
 };

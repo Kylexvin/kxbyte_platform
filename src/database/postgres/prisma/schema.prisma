@@ -19,6 +19,10 @@ model User {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
+  ownedOrganizations Organization[] @relation("OrganizationOwner")
+  memberships        Membership[]
+  sentInvitations    Invitation[] @relation("InvitationSender")
+
   sessions          Session[]
   verificationTokens VerificationToken[]
 
@@ -51,4 +55,169 @@ model VerificationToken {
   createdAt   DateTime  @default(now())
 
   @@map("verification_tokens")
+}
+
+// ============================================================
+// ORGANIZATIONS & MEMBERSHIPS
+// ============================================================
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  ownerId     String
+  owner       User     @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  logo        String?
+  email       String?
+  phone       String?
+  address     String?
+  country     String
+  currency    String   @default("KES")
+  timezone    String   @default("Africa/Nairobi")
+  isActive    Boolean  @default(true)
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships Membership[]
+  invitations Invitation[]
+  organizationProducts OrganizationProduct[]
+  roles        Role[]  // ← Add this line
+
+  @@index([ownerId])
+  @@index([slug])
+  @@map("organizations")
+}
+model Membership {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  roleId         String?
+  role           Role?    @relation(fields: [roleId], references: [id])  // ← add this
+  isActive       Boolean  @default(true)
+  joinedAt       DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, organizationId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("memberships")
+}
+
+// ============================================================
+// INVITATIONS
+// ============================================================
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model Invitation {
+  id             String   @id @default(uuid())
+  email          String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedById    String
+  invitedBy      User     @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
+  roleId         String?
+  token          String   @unique
+  status         InvitationStatus @default(PENDING)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([status])
+  @@map("invitations")
+}
+
+// ============================================================
+// PRODUCTS & ORGANIZATION PRODUCTS
+// ============================================================
+
+model Product {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  version     String   @default("1.0.0")
+  description String?
+  icon        String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organizationProducts OrganizationProduct[]
+
+  @@map("products")
+}
+
+model OrganizationProduct {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productId      String
+  product        Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  activatedAt    DateTime @default(now())
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, productId])
+  @@index([organizationId])
+  @@index([productId])
+  @@map("organization_products")
+}
+
+// ============================================================
+// AUTHORIZATION
+// ============================================================
+
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  name        String
+  description String?
+  productKey  String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  roles RolePermission[]
+
+  @@index([productKey])
+  @@map("permissions")
+}
+
+model Role {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  memberships    Membership[]
+  permissions    RolePermission[]
+
+  @@unique([organizationId, name])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
 }

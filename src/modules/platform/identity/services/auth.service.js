@@ -1,8 +1,10 @@
-//src/modules/platform/identity/services/auth.service.js
+// src/modules/platform/identity/services/auth.service.js
+
 import authDb from '../db/auth.db.js';
 import password from '../utils/password.js';
 import crypto from 'crypto';
 import jwt from '../utils/jwt.js';
+import { sendVerificationEmail, sendPasswordResetEmail, sendPasswordResetConfirmation } from '../email/email.service.js';
 
 const register = async (data) => {
   const { email, password: plainPassword, firstName, lastName } = data;
@@ -20,6 +22,18 @@ const register = async (data) => {
     firstName,
     lastName,
   });
+
+  // Generate verification token
+  const verifyToken = crypto.randomBytes(32).toString('hex');
+  await authDb.createVerificationToken({
+    userId: user.id,
+    token: verifyToken,
+    type: 'EMAIL_VERIFICATION',
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+  });
+
+  // Send verification email
+  await sendVerificationEmail(user.email, verifyToken, user.firstName);
 
   const accessToken = jwt.generateAccessToken(user);
   const refreshToken = jwt.generateRefreshToken(user);
@@ -121,11 +135,9 @@ const getMe = async (userId) => {
 const forgotPassword = async (email) => {
   const user = await authDb.findUserByEmail(email);
   if (!user) {
-    // Don't reveal if email exists or not (security)
     return { message: 'If your email is registered, you will receive a reset link' };
   }
 
-  // Generate reset token
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
@@ -136,8 +148,8 @@ const forgotPassword = async (email) => {
     expiresAt,
   });
 
-  // Log reset link (replace with email service later)
-  console.log(`📧 Password reset link: http://localhost:5000/reset-password?token=${token}`);
+  // Send password reset email
+  await sendPasswordResetEmail(user.email, token, user.firstName);
 
   return { message: 'If your email is registered, you will receive a reset link' };
 };
@@ -162,19 +174,89 @@ const resetPassword = async (token, newPassword) => {
 
   const hashedPassword = await password.hashPassword(newPassword);
 
-  await authDb.updateUser(verificationToken.userId, {
+  const user = await authDb.updateUser(verificationToken.userId, {
     password: hashedPassword,
   });
 
-  // Mark token as used
   await authDb.updateVerificationToken(verificationToken.id, {
     usedAt: new Date(),
   });
 
-  // Delete all sessions for this user (force re-login)
-  // TODO: Implement deleteAllSessionsByUserId
+  // Send confirmation email
+  await sendPasswordResetConfirmation(user.email, user.firstName);
 
   return { message: 'Password reset successful' };
+};
+
+const verifyEmail = async (token) => {
+  const verificationToken = await authDb.findVerificationToken(token);
+  if (!verificationToken) {
+    throw new Error('Invalid verification token');
+  }
+
+  if (verificationToken.expiresAt < new Date()) {
+    throw new Error('Verification token has expired');
+  }
+
+  if (verificationToken.usedAt) {
+    throw new Error('Verification token has already been used');
+  }
+
+  if (verificationToken.type !== 'EMAIL_VERIFICATION') {
+    throw new Error('Invalid token type');
+  }
+
+  await authDb.updateUser(verificationToken.userId, {
+    isEmailVerified: true,
+  });
+
+  await authDb.updateVerificationToken(verificationToken.id, {
+    usedAt: new Date(),
+  });
+
+  return { message: 'Email verified successfully' };
+};
+
+const changePassword = async (userId, currentPassword, newPassword) => {
+  const user = await authDb.findUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const isValid = await password.verifyPassword(currentPassword, user.password);
+  if (!isValid) {
+    throw new Error('Current password is incorrect');
+  }
+
+  if (currentPassword === newPassword) {
+    throw new Error('New password must be different from current password');
+  }
+
+  const hashedPassword = await password.hashPassword(newPassword);
+
+  await authDb.updateUser(userId, {
+    password: hashedPassword,
+  });
+
+  return { message: 'Password changed successfully' };
+};
+
+const logoutAllDevices = async (userId) => {
+  // Delete all sessions for this user
+  await authDb.deleteAllSessionsByUserId(userId);
+  return { message: 'Logged out from all devices' };
+};
+
+const getSessions = async (userId) => {
+  const sessions = await authDb.findSessionsByUserId(userId);
+  return sessions.map((s) => ({
+    id: s.id,
+    userAgent: s.userAgent,
+    ipAddress: s.ipAddress,
+    createdAt: s.createdAt,
+    expiresAt: s.expiresAt,
+    isRevoked: s.isRevoked,
+  }));
 };
 
 export default {
@@ -185,4 +267,8 @@ export default {
   getMe,
   forgotPassword,
   resetPassword,
+  verifyEmail,
+  changePassword,
+  logoutAllDevices,
+  getSessions,
 };

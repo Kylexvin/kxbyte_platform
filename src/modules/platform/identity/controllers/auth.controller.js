@@ -122,6 +122,80 @@ const resetPassword = async (req, res) => {
   }
 };
 
+const verifyEmail = async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) {
+      return res.status(400).json({ error: 'Verification token required' });
+    }
+    const result = await authService.verifyEmail(token);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'Invalid verification token' ||
+        error.message === 'Verification token has expired' ||
+        error.message === 'Verification token has already been used' ||
+        error.message === 'Invalid token type') {
+      return res.status(400).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const changePassword = async (req, res) => {
+  const validation = authValidator.validateChangePassword(req.body);
+  if (!validation.valid) {
+    return res.status(400).json({ errors: validation.errors });
+  }
+
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+    const result = await authService.changePassword(userId, currentPassword, newPassword);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    if (error.message === 'Current password is incorrect') {
+      return res.status(401).json({ error: error.message });
+    }
+    if (error.message === 'New password must be different from current password') {
+      return res.status(400).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const logoutAllDevices = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const result = await authService.logoutAllDevices(userId);
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getSessions = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const sessions = await authService.getSessions(userId);
+    res.status(200).json({ sessions });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   register,
   login,
@@ -130,4 +204,8 @@ export default {
   getMe,
   forgotPassword,
   resetPassword,
+  verifyEmail,
+  changePassword,
+  getSessions,
+  logoutAllDevices,
 };

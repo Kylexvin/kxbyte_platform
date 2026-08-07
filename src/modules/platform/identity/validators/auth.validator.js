@@ -89,6 +89,24 @@ const validateResetPassword = (data) => {
     errors,
   };
 };
+const validateChangePassword = (data) => {
+  const { currentPassword, newPassword } = data;
+  const errors = [];
+
+  if (!currentPassword || currentPassword.length < 8) {
+    errors.push('Current password must be at least 8 characters');
+  }
+
+  if (!newPassword || newPassword.length < 8) {
+    errors.push('New password must be at least 8 characters');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+};
+
 
 export default {
   validateRegister,
@@ -96,4 +114,5 @@ export default {
   validateRefreshToken,
   validateForgotPassword,
   validateResetPassword,
+  validateChangePassword,  
 };
