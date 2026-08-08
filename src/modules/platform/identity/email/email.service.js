@@ -220,4 +220,41 @@ export const sendInvitationEmail = async (email, token, organizationName, invite
 
   return result;
 };
+
+export const sendNotificationEmail = async (email, title, message, metadata = {}) => {
+  const bodyHtml = `
+    <p>Hi there,</p>
+    <p>${message}</p>
+    ${metadata.link ? `
+      <p style="text-align:center; margin:26px 0;">
+        <a href="${metadata.link}" class="button">${metadata.buttonText || 'View Details'}</a>
+      </p>
+    ` : ''}
+    <div class="note note-info">This is an automated notification from KXBYTE.</div>
+  `;
+
+  const html = buildEmailShell({
+    accent: COLORS.accent,
+    eyebrow: 'Notification',
+    title: title,
+    preheader: message.substring(0, 100),
+    bodyHtml,
+  });
+
+  const result = await sendEmail({
+    to: email,
+    subject: title,
+    html,
+  });
+
+  if (result.success) {
+    console.log(`✅ Notification email sent to: ${email}`);
+  } else {
+    console.log(`📧 Notification email failed: ${email}`);
+  }
+
+  return result;
+};
+
+
 export default sendEmail;

@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import jwt from '../utils/jwt.js';
 import { sendVerificationEmail, sendPasswordResetEmail, sendPasswordResetConfirmation } from '../email/email.service.js';
 import { logAudit } from '../utils/audit.helper.js';
+import notifications from '../../notifications/index.js';
 
 const register = async (data) => {
   const { email, password: plainPassword, firstName, lastName } = data;
@@ -42,6 +43,23 @@ const register = async (data) => {
     refreshToken,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
+
+  // Notification: Welcome
+  try {
+    await notifications.send({
+      userId: user.id,
+      type: 'USER_REGISTERED',
+      title: 'Welcome to KXBYTE!',
+      message: `Hello ${firstName}, welcome to KXBYTE. Verify your email to get started.`,
+      channel: 'IN_APP',
+      metadata: {
+        firstName,
+        email,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to send welcome notification:', error.message);
+  }
 
   const { password: _, ...userWithoutPassword } = user;
   return {
@@ -84,6 +102,23 @@ const login = async (email, plainPassword, req = null) => {
     ipAddress: req?.ip,
     userAgent: req?.headers?.['user-agent'],
   });
+
+  // Notification: Login
+  try {
+    await notifications.send({
+      userId: user.id,
+      type: 'USER_LOGIN',
+      title: 'Login detected',
+      message: `You logged in from ${req?.ip || 'unknown location'}`,
+      channel: 'IN_APP',
+      metadata: {
+        ip: req?.ip,
+        userAgent: req?.headers?.['user-agent'],
+      },
+    });
+  } catch (error) {
+    console.error('Failed to send login notification:', error.message);
+  }
 
   const { password: _, ...userWithoutPassword } = user;
   return {
@@ -196,6 +231,19 @@ const resetPassword = async (token, newPassword) => {
 
   await sendPasswordResetConfirmation(user.email, user.firstName);
 
+  // Notification: Password reset completed
+  try {
+    await notifications.send({
+      userId: user.id,
+      type: 'PASSWORD_RESET_COMPLETED',
+      title: 'Password Reset',
+      message: 'Your password has been reset successfully.',
+      channel: 'IN_APP',
+    });
+  } catch (error) {
+    console.error('Failed to send password reset notification:', error.message);
+  }
+
   return { message: 'Password reset successful' };
 };
 
@@ -217,13 +265,26 @@ const verifyEmail = async (token) => {
     throw new Error('Invalid token type');
   }
 
-  await authDb.updateUser(verificationToken.userId, {
+  const user = await authDb.updateUser(verificationToken.userId, {
     isEmailVerified: true,
   });
 
   await authDb.updateVerificationToken(verificationToken.id, {
     usedAt: new Date(),
   });
+
+  // Notification: Email verified
+  try {
+    await notifications.send({
+      userId: user.id,
+      type: 'EMAIL_VERIFIED',
+      title: 'Email Verified',
+      message: 'Your email has been verified successfully.',
+      channel: 'IN_APP',
+    });
+  } catch (error) {
+    console.error('Failed to send email verification notification:', error.message);
+  }
 
   return { message: 'Email verified successfully' };
 };
@@ -248,6 +309,19 @@ const changePassword = async (userId, currentPassword, newPassword) => {
   await authDb.updateUser(userId, {
     password: hashedPassword,
   });
+
+  // Notification: Password changed
+  try {
+    await notifications.send({
+      userId: user.id,
+      type: 'PASSWORD_CHANGED',
+      title: 'Password Updated',
+      message: 'Your password was changed successfully. If this wasn\'t you, contact support immediately.',
+      channel: 'IN_APP',
+    });
+  } catch (error) {
+    console.error('Failed to send password change notification:', error.message);
+  }
 
   return { message: 'Password changed successfully' };
 };

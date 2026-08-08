@@ -15,7 +15,8 @@ import products from './modules/platform/products/index.js';
 import authorization from './modules/platform/authorization/index.js';
 import subscription from './modules/platform/subscriptions/index.js';
 import audit from './modules/platform/audit/index.js';
-
+import notifications from './modules/platform/notifications/index.js';
+import payment from './modules/platform/payment/index.js';
 
 // ============================================================
 // PRODUCTS
@@ -48,7 +49,8 @@ products.register(app);
 authorization.register(app);
 subscription.register(app);
 audit.register(app);
-
+notifications.register(app);
+payment.register(app);
 // ============================================================
 // PRODUCT REGISTRATION
 // ============================================================

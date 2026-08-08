@@ -27,6 +27,7 @@ model User {
   sessions          Session[]
   verificationTokens VerificationToken[]
   auditEvents       AuditEvent[]
+  notifications Notification[]
 
   @@map("users")
 }
@@ -87,6 +88,10 @@ model Organization {
   roles        Role[]
   subscriptions Subscription[]
   auditEvents  AuditEvent[]
+  notifications Notification[]
+  paymentConfig PaymentMerchantConfig?
+  paymentTransactions PaymentTransaction[]
+  paymentIPNRegistrations PaymentIPNRegistration[]
 
   @@index([ownerId])
   @@index([slug])
@@ -332,10 +337,10 @@ model Payment {
 
 model AuditEvent {
   id             String   @id @default(uuid())
-  organizationId String?  // ← Make optional
+  organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   action         String
   resource       String
   resourceId     String?
@@ -350,4 +355,125 @@ model AuditEvent {
   @@index([resource])
   @@index([createdAt])
   @@map("audit_events")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+}
+
+model Notification {
+  id             String   @id @default(uuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  type           String
+  title          String
+  message        String
+  channel        NotificationChannel @default(IN_APP)
+  productKey     String?
+  resource       String?
+  resourceId     String?
+  metadata       Json?
+  readAt         DateTime?
+  sentAt         DateTime?
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([channel])
+  @@index([type])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ============================================================
+// PAYMENTS
+// ============================================================
+
+model PaymentMerchantConfig {
+  id              String   @id @default(uuid())
+  organizationId  String   @unique
+  provider        String   @default("PESAPAL")
+  environment     String   // SANDBOX | LIVE
+  consumerKey     String
+  consumerSecret  String   // ENCRYPTED
+  isActive        Boolean  @default(true)
+  lastTestedAt    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("payment_merchant_configs")
+}
+
+model PaymentTransaction {
+  id                  String   @id @default(uuid())
+  organizationId      String
+  productId           String?
+  productReference    String?
+  provider            String   @default("PESAPAL")
+  merchantReference   String   @unique
+  orderTrackingId     String?
+  confirmationCode    String?
+  amount              Decimal
+  currency            String   @default("KES")
+  description         String?
+  status              String   @default("PENDING")
+  paymentMethod       String?
+  paymentAccount      String?
+  redirectUrl         String?
+  callbackUrl         String?
+  cancellationUrl     String?
+  notificationId      String?
+  billingEmail        String?
+  billingPhone        String?
+  billingFirstName    String?
+  billingLastName     String?
+  billingCountry      String?
+  billingLine1        String?
+  billingCity         String?
+  billingState        String?
+  metadata            Json?
+  ipnReceived         Boolean  @default(false)
+  ipnPayload          Json?
+  statusCode          Int?
+  statusDescription   String?
+  createdDate         DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([orderTrackingId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("payment_transactions")
+}
+
+model PaymentIPNRegistration {
+  id                String   @id @default(uuid())
+  organizationId    String
+  provider          String   @default("PESAPAL")
+  ipnId             String
+  url               String
+  notificationType  String   // GET | POST
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider, ipnId])
+  @@index([organizationId])
+  @@map("payment_ipn_registrations")
 }
