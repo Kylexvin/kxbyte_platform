@@ -63,6 +63,19 @@ const deactivateOrganizationProduct = async (organizationId, productId) => {
   });
 };
 
+
+const updateOrganizationProduct = async (organizationId, productId, data) => {
+  return prisma.organizationProduct.update({
+    where: {
+      organizationId_productId: {
+        organizationId,
+        productId,
+      },
+    },
+    data,
+  });
+};
+
 const isProductActivated = async (organizationId, productKey) => {
   const product = await findProductByKey(productKey);
   if (!product) return false;
@@ -79,5 +92,6 @@ export default {
   findOrganizationProducts,
   createOrganizationProduct,
   deactivateOrganizationProduct,
+  updateOrganizationProduct, 
   isProductActivated,
 };

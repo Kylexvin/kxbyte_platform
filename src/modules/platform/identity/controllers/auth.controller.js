@@ -21,6 +21,7 @@ const register = async (req, res) => {
   }
 };
 
+// Only change login
 const login = async (req, res) => {
   const validation = authValidator.validateLogin(req.body);
   if (!validation.valid) {
@@ -29,7 +30,7 @@ const login = async (req, res) => {
 
   try {
     const { email, password } = req.body;
-    const result = await authService.login(email, password);
+    const result = await authService.login(email, password, req); // ← pass req
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'Invalid credentials') {

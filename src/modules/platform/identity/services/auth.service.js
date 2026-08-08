@@ -5,6 +5,7 @@ import password from '../utils/password.js';
 import crypto from 'crypto';
 import jwt from '../utils/jwt.js';
 import { sendVerificationEmail, sendPasswordResetEmail, sendPasswordResetConfirmation } from '../email/email.service.js';
+import { logAudit } from '../utils/audit.helper.js';
 
 const register = async (data) => {
   const { email, password: plainPassword, firstName, lastName } = data;
@@ -23,16 +24,14 @@ const register = async (data) => {
     lastName,
   });
 
-  // Generate verification token
   const verifyToken = crypto.randomBytes(32).toString('hex');
   await authDb.createVerificationToken({
     userId: user.id,
     token: verifyToken,
     type: 'EMAIL_VERIFICATION',
-    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24 hours
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
   });
 
-  // Send verification email
   await sendVerificationEmail(user.email, verifyToken, user.firstName);
 
   const accessToken = jwt.generateAccessToken(user);
@@ -52,7 +51,7 @@ const register = async (data) => {
   };
 };
 
-const login = async (email, plainPassword) => {
+const login = async (email, plainPassword, req = null) => {
   const user = await authDb.findUserByEmail(email);
   if (!user) {
     throw new Error('Invalid credentials');
@@ -70,6 +69,20 @@ const login = async (email, plainPassword) => {
     userId: user.id,
     refreshToken,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  });
+
+  // Audit log: User logged in
+  await logAudit({
+    organizationId: null,
+    userId: user.id,
+    action: 'USER_LOGIN',
+    resource: 'user',
+    resourceId: user.id,
+    metadata: {
+      email: user.email,
+    },
+    ipAddress: req?.ip,
+    userAgent: req?.headers?.['user-agent'],
   });
 
   const { password: _, ...userWithoutPassword } = user;
@@ -139,7 +152,7 @@ const forgotPassword = async (email) => {
   }
 
   const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
   await authDb.createVerificationToken({
     userId: user.id,
@@ -148,7 +161,6 @@ const forgotPassword = async (email) => {
     expiresAt,
   });
 
-  // Send password reset email
   await sendPasswordResetEmail(user.email, token, user.firstName);
 
   return { message: 'If your email is registered, you will receive a reset link' };
@@ -182,7 +194,6 @@ const resetPassword = async (token, newPassword) => {
     usedAt: new Date(),
   });
 
-  // Send confirmation email
   await sendPasswordResetConfirmation(user.email, user.firstName);
 
   return { message: 'Password reset successful' };
@@ -242,7 +253,6 @@ const changePassword = async (userId, currentPassword, newPassword) => {
 };
 
 const logoutAllDevices = async (userId) => {
-  // Delete all sessions for this user
   await authDb.deleteAllSessionsByUserId(userId);
   return { message: 'Logged out from all devices' };
 };

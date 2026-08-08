@@ -96,6 +96,21 @@ const permissions = [
     name: 'Update Settings',
     description: 'Modify KxTill settings',
   },
+
+  // ============================================================
+  // AUDIT LOGS
+  // ============================================================
+  {
+  key: 'audit.logs.view',
+  name: 'View Audit Logs',
+  description: 'View audit logs for the organization',
+},
+{
+  key: 'audit.logs.export',
+  name: 'Export Audit Logs',
+  description: 'Export audit logs for the organization',
+},
+
 ];
 
 export default permissions;

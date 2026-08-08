@@ -67,6 +67,12 @@ const deletePermission = async (key) => {
   });
 };
 
+const findPermissionById = async (id) => {
+  return prisma.permission.findUnique({
+    where: { id },
+  });
+};
+
 export default {
   createPermission,
   createManyPermissions,
@@ -75,4 +81,5 @@ export default {
   findAllPermissions,
   findPermissionsByKeys,
   deletePermission,
+  findPermissionById,
 };

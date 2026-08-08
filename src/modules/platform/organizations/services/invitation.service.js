@@ -4,31 +4,25 @@ import crypto from 'crypto';
 import invitationDb from '../db/invitation.db.js';
 import orgDb from '../db/org.db.js';
 import { sendInvitationEmail } from '../../identity/email/email.service.js';
+import audit from '../../audit/index.js';
 
 const INVITATION_EXPIRY_DAYS = 7;
 
 const sendInvitation = async (inviterId, organizationId, email, roleId = null) => {
-  // Check if organization exists
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
   }
 
-  // Check if inviter is owner
   if (organization.ownerId !== inviterId) {
     throw new Error('Only the organization owner can send invitations');
   }
 
-  // Check for existing pending invitation
   const pending = await invitationDb.findPendingInvitation(email, organizationId);
   if (pending) {
     throw new Error('An invitation is already pending for this email');
   }
 
-  // Check if user is already a member (by email lookup)
-  // We'll handle this in the controller with user lookup
-
-  // Generate token
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
 
@@ -41,12 +35,24 @@ const sendInvitation = async (inviterId, organizationId, email, roleId = null) =
     expiresAt,
   });
 
-  // Get inviter name
   const inviter = await orgDb.findUserById(inviterId);
   const inviterName = inviter ? `${inviter.firstName} ${inviter.lastName}` : 'Someone';
 
-  // Send email
   await sendInvitationEmail(email, token, organization.name, inviterName);
+
+  // Audit log: Invitation sent
+  await audit.log({
+    organizationId: organization.id,
+    userId: inviterId,
+    action: 'INVITATION_SENT',
+    resource: 'invitation',
+    resourceId: invitation.id,
+    metadata: {
+      email: email,
+      roleId: roleId,
+      expiresAt: expiresAt,
+    },
+  });
 
   return invitation;
 };
@@ -66,13 +72,11 @@ const acceptInvitation = async (token, userId) => {
     throw new Error('Invitation has expired');
   }
 
-  // Check if user already has membership
   const existingMembership = await orgDb.findMembership(userId, invitation.organizationId);
   if (existingMembership) {
     throw new Error('You are already a member of this organization');
   }
 
-  // Create membership
   const membership = await orgDb.createMembership({
     userId,
     organizationId: invitation.organizationId,
@@ -80,8 +84,20 @@ const acceptInvitation = async (token, userId) => {
     isActive: true,
   });
 
-  // Update invitation status
   await invitationDb.updateInvitationStatus(invitation.id, 'ACCEPTED', new Date());
+
+  // Audit log: Invitation accepted
+  await audit.log({
+    organizationId: invitation.organizationId,
+    userId: userId,
+    action: 'INVITATION_ACCEPTED',
+    resource: 'invitation',
+    resourceId: invitation.id,
+    metadata: {
+      email: invitation.email,
+      roleId: invitation.roleId,
+    },
+  });
 
   return {
     membership,
@@ -100,6 +116,19 @@ const rejectInvitation = async (token) => {
   }
 
   await invitationDb.updateInvitationStatus(invitation.id, 'REJECTED');
+
+  // Audit log: Invitation rejected
+  await audit.log({
+    organizationId: invitation.organizationId,
+    userId: invitation.invitedById,
+    action: 'INVITATION_REJECTED',
+    resource: 'invitation',
+    resourceId: invitation.id,
+    metadata: {
+      email: invitation.email,
+    },
+  });
+
   return { message: 'Invitation rejected' };
 };
 

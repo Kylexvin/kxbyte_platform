@@ -13,6 +13,9 @@ import identity from './modules/platform/identity/index.js';
 import organizations from './modules/platform/organizations/index.js';
 import products from './modules/platform/products/index.js';
 import authorization from './modules/platform/authorization/index.js';
+import subscription from './modules/platform/subscriptions/index.js';
+import audit from './modules/platform/audit/index.js';
+
 
 // ============================================================
 // PRODUCTS
@@ -43,6 +46,8 @@ identity.register(app);
 organizations.register(app);
 products.register(app);
 authorization.register(app);
+subscription.register(app);
+audit.register(app);
 
 // ============================================================
 // PRODUCT REGISTRATION
@@ -52,14 +57,14 @@ export async function initializeProducts() {
   for (const [key, product] of Object.entries(productRegistry)) {
     // Register product permissions
     if (product.permissions?.length) {
-      await authorization.registerPermissions(
-        key,
-        product.permissions
-      );
+      await authorization.registerPermissions(key, product.permissions);
+      console.log(`✅ Registered ${product.permissions.length} permissions for ${product.name}`);
+    }
 
-      console.log(
-        `✅ Registered ${product.permissions.length} permissions for ${product.name}`
-      );
+    // Register product plans
+    if (product.subscription?.plans?.length) {
+      await subscription.registerPlans(key, product.subscription.plans);
+      console.log(`✅ Registered ${product.subscription.plans.length} plans for ${product.name}`);
     }
   }
 }

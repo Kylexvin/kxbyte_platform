@@ -22,9 +22,11 @@ model User {
   ownedOrganizations Organization[] @relation("OrganizationOwner")
   memberships        Membership[]
   sentInvitations    Invitation[] @relation("InvitationSender")
+  
 
   sessions          Session[]
   verificationTokens VerificationToken[]
+  auditEvents       AuditEvent[]
 
   @@map("users")
 }
@@ -82,7 +84,9 @@ model Organization {
   memberships Membership[]
   invitations Invitation[]
   organizationProducts OrganizationProduct[]
-  roles        Role[]  // ← Add this line
+  roles        Role[]
+  subscriptions Subscription[]
+  auditEvents  AuditEvent[]
 
   @@index([ownerId])
   @@index([slug])
@@ -220,4 +224,130 @@ model RolePermission {
 
   @@id([roleId, permissionId])
   @@map("role_permissions")
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  GRACE
+  EXPIRED
+  CANCELLED
+  SUSPENDED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+// ============================================================
+// SUBSCRIPTIONS & PLANS
+// ============================================================
+
+model Plan {
+  id          String          @id @default(uuid())
+  productKey  String
+  key         String          // "professional", "business"
+  name        String
+  price       Int             // Whole currency amount: 699 = KES 699
+  currency    String          @default("KES")
+  interval    BillingInterval @default(MONTHLY)
+  trialDays   Int             @default(21)
+  features    String[]        // ["sales", "inventory"]
+  limits      Json?           // { "users": 5, "products": 5000 }
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  subscriptions Subscription[]
+
+  @@unique([productKey, key])
+  @@index([productKey])
+  @@map("plans")
+}
+
+model Subscription {
+  id                   String             @id @default(uuid())
+  organizationId       String
+  organization         Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  productKey           String
+  planId               String
+  plan                 Plan               @relation(fields: [planId], references: [id])
+  status               SubscriptionStatus @default(TRIAL)
+
+  trialStart           DateTime?
+  trialEnd             DateTime?
+  graceStart           DateTime?
+  graceEnd             DateTime?
+
+  currentPeriodStart   DateTime           @default(now())
+  currentPeriodEnd     DateTime
+
+  cancelledAt          DateTime?
+  expiredAt            DateTime?
+
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  payments             Payment[]
+
+  @@unique([organizationId, productKey])
+  @@index([organizationId])
+  @@index([productKey])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id             String        @id @default(uuid())
+  subscriptionId String
+  subscription   Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  amount         Int           // Whole currency amount: 699 = KES 699
+  currency       String        @default("KES")
+  status         PaymentStatus
+  method         String?       // mpesa, card, bank
+  reference      String?
+  metadata       Json?
+  paidAt         DateTime?
+
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@map("payments")
+}
+
+// ============================================================
+// AUDIT LOGS
+// ============================================================
+
+model AuditEvent {
+  id             String   @id @default(uuid())
+  organizationId String?  // ← Make optional
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action         String
+  resource       String
+  resourceId     String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+  @@index([resource])
+  @@index([createdAt])
+  @@map("audit_events")
 }
