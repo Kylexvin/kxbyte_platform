@@ -95,6 +95,7 @@ model Organization {
   paymentIPNRegistrations PaymentIPNRegistration[]
   kxtillProducts    KxTillProduct[]
   kxtillSales       KxTillSale[]
+  kxtillStoreSetting KxTillStoreSetting?
 
   @@index([ownerId])
   @@index([slug])
@@ -679,3 +680,29 @@ model KxTillSalePayment {
   @@map("kxtill_sale_payments")
 }
 
+// ============================================================
+// KXTILL - STORE SETTINGS
+// ============================================================
+
+model KxTillStoreSetting {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  shopName       String?
+  shopPhone      String?
+  shopAddress    String?
+  shopEmail      String?
+  taxNumber      String?
+
+  receiptFooter  String?
+  receiptHeader  String?
+
+  showTax        Boolean  @default(false)
+  showCustomer   Boolean  @default(false)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("kxtill_store_settings")
+}
