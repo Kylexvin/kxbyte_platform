@@ -22,13 +22,16 @@ const log = async (data) => {
     }
   }
 
-  const user = await orgDb.findUserById(userId);
-  if (!user) {
-    throw new Error('User not found');
+  // ✅ Only validate user if userId is provided
+  if (userId) {
+    const user = await orgDb.findUserById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
   }
 
   const createData = {
-    userId,
+    userId: userId || null,
     action,
     resource,
     resourceId: resourceId || null,

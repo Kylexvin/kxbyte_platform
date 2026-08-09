@@ -19,5 +19,7 @@ router.get('/:productKey', subscriptionController.getSubscription);
 router.get('/:productKey/status', subscriptionController.getSubscriptionStatus);
 router.delete('/:productKey', subscriptionController.cancelSubscription);
 router.post('/:productKey/renew', subscriptionController.renewSubscription);
+router.post('/:productKey/pay', subscriptionController.paySubscription); 
+
 
 export default router;

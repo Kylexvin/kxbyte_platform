@@ -15,6 +15,7 @@ router.get('/config', paymentController.getMerchantConfig);
 
 // IPN registration
 router.post('/ipn/register', paymentController.registerIPN);
+router.get('/ipn', paymentController.getIPNRegistration);
 
 // Payment
 router.post('/initiate', paymentController.initiatePayment);

@@ -5,6 +5,7 @@ import planDb from '../db/plan.db.js';
 import orgDb from '../../organizations/db/org.db.js';
 import { addDays } from 'date-fns';
 import audit from '../../audit/index.js';
+import payment from '../../payment/index.js';
 
 const SUBSCRIPTION_STATUS = {
   TRIAL: 'TRIAL',
@@ -81,6 +82,142 @@ const getOrganizationSubscriptions = async (organizationId) => {
     subscriptions.map((sub) => enrichSubscription(sub))
   );
   return enriched;
+};
+
+// ============================================================
+// PAYMENT INTEGRATION
+// ============================================================
+
+const initiateSubscriptionPayment = async (organizationId, productKey, userId) => {
+  const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (!subscription) {
+    throw new Error('Subscription not found');
+  }
+
+  const plan = await planDb.findPlanById(subscription.planId);
+  if (!plan) {
+    throw new Error('Plan not found');
+  }
+
+  // Get user for billing email
+  const user = await orgDb.findUserById(userId);
+
+  // Initiate payment
+  const paymentResult = await payment.initiatePayment(
+    userId,
+    organizationId,
+    productKey,
+    subscription.id,
+    {
+      amount: plan.price,
+      currency: plan.currency || 'KES',
+      description: `${plan.name} subscription - ${productKey}`,
+      billingAddress: {
+        email: user?.email || '',
+        phone: '',
+        country: 'KE',
+      },
+    }
+  );
+
+  // Store payment reference on subscription
+  await subscriptionDb.updateSubscription(subscription.id, {
+    metadata: {
+      ...(subscription.metadata || {}),
+      paymentTransactionId: paymentResult.transactionId,
+      paymentMerchantReference: paymentResult.merchantReference,
+    },
+  });
+
+  // Audit log
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'SUBSCRIPTION_PAYMENT_INITIATED',
+    resource: 'subscription',
+    resourceId: subscription.id,
+    metadata: {
+      productKey,
+      planKey: plan.key,
+      amount: plan.price,
+      transactionId: paymentResult.transactionId,
+    },
+  });
+
+  return {
+    subscriptionId: subscription.id,
+    transactionId: paymentResult.transactionId,
+    merchantReference: paymentResult.merchantReference,
+    redirectUrl: paymentResult.redirectUrl,
+  };
+};
+
+const handleSubscriptionPaymentSuccess = async (organizationId, productKey, transactionId) => {
+  const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (!subscription) {
+    throw new Error('Subscription not found');
+  }
+
+  const plan = await planDb.findPlanById(subscription.planId);
+  if (!plan) {
+    throw new Error('Plan not found');
+  }
+
+  const now = new Date();
+  const periodEnd = addDays(now, plan.interval === 'MONTHLY' ? 30 : 365);
+
+  // Update subscription to ACTIVE
+  await subscriptionDb.updateSubscription(subscription.id, {
+    status: SUBSCRIPTION_STATUS.ACTIVE,
+    currentPeriodStart: now,
+    currentPeriodEnd: periodEnd,
+    graceStart: null,
+    graceEnd: null,
+  });
+
+  // Audit log
+  await audit.log({
+    organizationId,
+    action: 'SUBSCRIPTION_PAYMENT_SUCCESS',
+    resource: 'subscription',
+    resourceId: subscription.id,
+    metadata: {
+      transactionId,
+      productKey,
+      planKey: plan.key,
+      periodEnd,
+    },
+  });
+
+  // Send notification
+  try {
+    const notification = await import('../../notifications/index.js');
+    const org = await orgDb.findOrganizationById(organizationId);
+    const user = await orgDb.findUserById(org.ownerId);
+    
+    await notification.default.send({
+      userId: user.id,
+      organizationId,
+      type: 'SUBSCRIPTION_ACTIVATED',
+      title: 'Subscription Activated',
+      message: `Your ${productKey} subscription is now active.`,
+      channel: 'IN_APP',
+      metadata: {
+        productKey,
+        planKey: plan.key,
+        expiresAt: periodEnd,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to send subscription notification:', error.message);
+  }
+
+  return {
+    success: true,
+    subscriptionId: subscription.id,
+    status: SUBSCRIPTION_STATUS.ACTIVE,
+    periodEnd,
+  };
 };
 
 const enrichSubscription = async (subscription) => {
@@ -204,5 +341,7 @@ export default {
   updateSubscriptionStatus,
   cancelSubscription,
   renewSubscription,
+  initiateSubscriptionPayment,
+  handleSubscriptionPaymentSuccess,
   SUBSCRIPTION_STATUS,
 };

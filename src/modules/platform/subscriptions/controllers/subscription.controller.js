@@ -100,6 +100,41 @@ const getSubscription = async (req, res) => {
   }
 };
 
+const paySubscription = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, productKey } = req.params;
+
+    // Check if user is owner
+    const organization = await orgDb.findOrganizationById(organizationId);
+    if (!organization) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    if (organization.ownerId !== userId) {
+      return res.status(403).json({ error: 'Only the organization owner can pay for subscriptions' });
+    }
+
+    const result = await subscriptionService.initiateSubscriptionPayment(
+      organizationId,
+      productKey,
+      userId
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'Subscription not found' || error.message === 'Plan not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Pay subscription error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 const getOrganizationSubscriptions = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -207,4 +242,5 @@ export default {
   getSubscriptionStatus,
   cancelSubscription,
   renewSubscription,
+  paySubscription,
 };

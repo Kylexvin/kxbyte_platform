@@ -1,6 +1,8 @@
 // src/modules/products/kxtill/index.js
 
 import permissions from './permissions.js';
+import kxtillRoutes from './routes/kxtill.routes.js';
+import productService from './services/product.service.js';
 
 const KxTill = {
   key: 'kxtill',
@@ -43,6 +45,14 @@ const KxTill = {
     console.log(`[KxTill] Initializing for organization ${organizationId}`);
     return { success: true };
   },
+
+  // Routes registration
+  register: (app) => {
+    app.use('/api/v1/organizations/:organizationId/kxtill', kxtillRoutes);
+  },
+
+  // Service exports for other modules
+  productService,
 };
 
 export default KxTill;

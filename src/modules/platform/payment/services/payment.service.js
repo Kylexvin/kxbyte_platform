@@ -72,6 +72,37 @@ const configureMerchant = async (userId, organizationId, data) => {
     });
   }
 
+  // ✅ Automatically register IPN URL
+  try {
+    const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+    const ipnUrl = `${baseUrl}/api/v1/payment/webhook/ipn`;
+    
+    // Check if IPN already registered
+    const existingIpn = await paymentDb.findIpnRegistrationByOrg(organizationId);
+    if (!existingIpn) {
+      const authService = new pesapalService.PesapalAuthService(
+        config.environment,
+        config.consumerKey,
+        decrypt(config.consumerSecret)
+      );
+      
+      const result = await pesapalService.registerIPN(authService, ipnUrl, 'POST');
+      
+      await paymentDb.createIpnRegistration({
+        organizationId,
+        ipnId: result.ipn_id,
+        url: result.url,
+        notificationType: result.ipn_notification_type_description || 'POST',
+        isActive: result.ipn_status === 1,
+      });
+      
+      console.log(`✅ IPN automatically registered for organization ${organizationId}`);
+    }
+  } catch (error) {
+    console.error('Failed to auto-register IPN:', error.message);
+    // Don't fail the config if IPN registration fails
+  }
+
   await audit.log({
     organizationId,
     userId,
@@ -291,7 +322,7 @@ const getTransactionByOrderTrackingId = async (organizationId, userId, orderTrac
 
   const status = await pesapalService.getTransactionStatus(authService, orderTrackingId);
 
-  await paymentDb.updateTransactionByOrderTrackingId(orderTrackingId, {
+  await paymentDb.updateTransaction(transaction.id, {
     statusCode: status.status_code,
     statusDescription: status.payment_status_description,
     paymentMethod: status.payment_method,
@@ -368,6 +399,21 @@ const handleIPN = async (payload) => {
       notificationType: OrderNotificationType,
     },
   });
+
+  // ✅ Trigger subscription update if payment succeeded
+  if (status.status_code === 1 && transaction.productId) {
+    try {
+      const { default: subscriptionService } = await import('../../subscriptions/index.js');
+      await subscriptionService.handleSubscriptionPaymentSuccess(
+        transaction.organizationId,
+        transaction.productId,
+        transaction.id
+      );
+      console.log(`✅ Subscription updated for ${transaction.productId}`);
+    } catch (error) {
+      console.error('Failed to update subscription:', error.message);
+    }
+  }
 
   return {
     orderNotificationType: OrderNotificationType || 'IPNCHANGE',

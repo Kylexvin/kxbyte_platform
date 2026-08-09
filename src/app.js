@@ -51,6 +51,16 @@ subscription.register(app);
 audit.register(app);
 notifications.register(app);
 payment.register(app);
+
+// ============================================================
+// KXTILL ROUTE REGISTRATION
+// ============================================================
+
+const kxtill = productRegistry.kxtill;
+if (kxtill && kxtill.register) {
+  kxtill.register(app);
+}
+
 // ============================================================
 // PRODUCT REGISTRATION
 // ============================================================

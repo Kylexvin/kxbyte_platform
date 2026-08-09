@@ -28,6 +28,7 @@ model User {
   verificationTokens VerificationToken[]
   auditEvents       AuditEvent[]
   notifications Notification[]
+  kxtillSales       KxTillSale[]
 
   @@map("users")
 }
@@ -92,6 +93,8 @@ model Organization {
   paymentConfig PaymentMerchantConfig?
   paymentTransactions PaymentTransaction[]
   paymentIPNRegistrations PaymentIPNRegistration[]
+  kxtillProducts    KxTillProduct[]
+  kxtillSales       KxTillSale[]
 
   @@index([ownerId])
   @@index([slug])
@@ -298,6 +301,9 @@ model Subscription {
   cancelledAt          DateTime?
   expiredAt            DateTime?
 
+  // ✅ Add this field
+  metadata             Json?
+
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
@@ -477,3 +483,199 @@ model PaymentIPNRegistration {
   @@index([organizationId])
   @@map("payment_ipn_registrations")
 }
+
+
+// ============================================================
+// KXTILL - PRODUCTS, UNITS, PRICING & INVENTORY
+// ============================================================
+
+model KxTillProduct {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  sku            String?
+  description    String?
+  category       String?
+  taxRate        Decimal  @default(0)
+  isActive       Boolean  @default(true)
+  trackInventory Boolean  @default(true)
+
+  // Base unit (single field, with @unique)
+  baseUnitId     String?  @unique
+  baseUnit       KxTillProductUnit? @relation("KxTillBaseUnit", fields: [baseUnitId], references: [id])
+
+  // All units configured for this product
+  units          KxTillProductUnit[] @relation("KxTillProductUnits")
+
+  // Current stock, always stored in base units
+  stock          Decimal  @default(0)
+  minStock       Decimal  @default(0)
+
+  saleItems      KxTillSaleItem[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([sku])
+  @@map("kxtill_products")
+}
+
+
+// ============================================================
+// KXTILL - PRODUCT UNITS
+// ============================================================
+
+model KxTillProductUnit {
+  id               String   @id @default(uuid())
+  productId        String
+  product          KxTillProduct @relation("KxTillProductUnits", fields: [productId], references: [id], onDelete: Cascade)
+  name             String
+  abbreviation     String
+  unitType         String
+  conversionQty    Decimal  @default(1)
+  price            Decimal?
+  allowFractional  Boolean  @default(false)
+  barcode          String?
+  isBaseUnit       Boolean  @default(false)
+  baseForProduct   KxTillProduct? @relation("KxTillBaseUnit")
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  saleItems        KxTillSaleItem[]
+
+  @@unique([productId, name])
+  @@unique([productId, abbreviation])
+  @@index([productId])
+  @@map("kxtill_product_units")
+}
+
+
+// ============================================================
+// KXTILL - SALES
+// ============================================================
+
+model KxTillSale {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  subtotal       Decimal
+  taxAmount      Decimal  @default(0)
+  discount       Decimal  @default(0)
+  totalAmount    Decimal
+  status         String   @default("COMPLETED")
+  paymentStatus  String   @default("PAID")
+
+  items          KxTillSaleItem[]
+  payments       KxTillSalePayment[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@index([paymentStatus])
+  @@index([createdAt])
+  @@map("kxtill_sales")
+}
+
+
+// ============================================================
+// KXTILL - SALE ITEMS
+// ============================================================
+
+model KxTillSaleItem {
+  id             String   @id @default(uuid())
+
+  saleId         String
+  sale           KxTillSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  productId      String
+  product        KxTillProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  // Unit selected by the attendant
+  unitId         String
+  unit           KxTillProductUnit @relation(fields: [unitId], references: [id])
+
+  // Historical snapshots.
+  // These protect old sales if the product/unit is later changed.
+  unitName       String
+  unitAbbrev     String
+  unitType       String
+
+  // Quantity sold in the selected unit.
+  //
+  // Examples:
+  // 2 pieces
+  // 3 cartons
+  // 0.5 piece
+  // 2 x 500g bags
+  quantity       Decimal
+
+  // Conversion at the exact time of sale.
+  //
+  // Examples:
+  // Carton = 12 pieces
+  // 500g   = 0.5kg
+  conversionQty  Decimal
+
+  // Price at the exact time of sale.
+  unitPrice      Decimal
+
+  // Final quantity deducted from inventory.
+  //
+  // baseQuantity = quantity × conversionQty
+  //
+  // Example:
+  // 2 cartons × 12 pieces = 24 pieces
+  // 3 × 500g × 0.5kg = 1.5kg
+  baseQuantity   Decimal
+
+  taxRate        Decimal  @default(0)
+  taxAmount      Decimal  @default(0)
+  discount       Decimal  @default(0)
+
+  total          Decimal
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([saleId])
+  @@index([productId])
+  @@index([unitId])
+  @@map("kxtill_sale_items")
+}
+
+
+// ============================================================
+// KXTILL - SALE PAYMENTS
+// ============================================================
+
+model KxTillSalePayment {
+  id             String   @id @default(uuid())
+
+  saleId         String
+  sale            KxTillSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  // CASH, MPESA, CARD, BANK, OTHER
+  method         String
+
+  amount         Decimal
+
+  // M-Pesa receipt, card reference, bank reference, etc.
+  reference      String?
+
+  metadata       Json?
+
+  createdAt      DateTime @default(now())
+
+  @@index([saleId])
+  @@index([method])
+  @@map("kxtill_sale_payments")
+}
+

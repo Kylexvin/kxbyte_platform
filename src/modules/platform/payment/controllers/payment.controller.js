@@ -2,6 +2,8 @@
 
 import paymentService from '../services/payment.service.js';
 import paymentValidator from '../validators/payment.validator.js';
+import paymentDb from '../db/payment.db.js';
+import orgDb from '../../organizations/db/org.db.js';
 
 // ========================
 // Merchant Configuration
@@ -87,6 +89,28 @@ const registerIPN = async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
     console.error('Register IPN error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getIPNRegistration = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+
+    const membership = await orgDb.findMembership(userId, organizationId);
+    if (!membership) {
+      return res.status(403).json({ error: 'You do not have access to this organization' });
+    }
+
+    const ipn = await paymentDb.findIpnRegistrationByOrg(organizationId);
+    res.status(200).json({ ipn });
+  } catch (error) {
+    console.error('Get IPN registration error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -183,6 +207,7 @@ const handleIPN = async (req, res) => {
 
     console.log('IPN received:', payload);
 
+    // ✅ Call paymentService.handleIPN which now triggers subscription update
     const result = await paymentService.handleIPN(payload);
 
     res.status(200).json(result);
@@ -201,7 +226,6 @@ const handleIPN = async (req, res) => {
   }
 };
 
-
 export default {
   configureMerchant,
   getMerchantConfig,
@@ -209,4 +233,5 @@ export default {
   initiatePayment,
   getTransactionStatus,
   handleIPN, 
+  getIPNRegistration
 };
