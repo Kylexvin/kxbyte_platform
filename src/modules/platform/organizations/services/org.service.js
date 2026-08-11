@@ -4,6 +4,7 @@ import orgDb from '../db/org.db.js';
 import { getCountryDefaults } from '../utils/country.utils.js';
 import { generateSlug } from '../utils/slug.utils.js';
 import audit from '../../audit/index.js';
+import prisma from '../../../../database/postgres/prisma.js';
 
 const createOrganization = async (userId, data) => {
   const { name, country } = data;
@@ -24,6 +25,21 @@ const createOrganization = async (userId, data) => {
     userId,
     organizationId: organization.id,
     isActive: true,
+    hasAllBranches: true, // Owner has access to all branches
+  });
+
+  // ✅ Create default branch
+  const defaultBranch = await prisma.branch.create({
+    data: {
+      organizationId: organization.id,
+      name: 'Main Branch',
+      code: 'MAIN',
+      address: '',
+      phone: '',
+      email: '',
+      isDefault: true,
+      isActive: true,
+    },
   });
 
   // Audit log: Organization created
@@ -40,9 +56,23 @@ const createOrganization = async (userId, data) => {
     },
   });
 
+  // Audit log: Default branch created
+  await audit.log({
+    organizationId: organization.id,
+    userId: userId,
+    action: 'BRANCH_CREATED',
+    resource: 'branch',
+    resourceId: defaultBranch.id,
+    metadata: {
+      name: defaultBranch.name,
+      code: defaultBranch.code,
+    },
+  });
+
   return {
     organization,
     membership,
+    defaultBranch,
   };
 };
 

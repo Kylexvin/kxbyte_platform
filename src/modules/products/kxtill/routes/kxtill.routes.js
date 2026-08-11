@@ -20,6 +20,13 @@ router.get('/products/:productId', productController.getProduct);
 router.patch('/products/:productId', productController.updateProduct);
 router.delete('/products/:productId', productController.deleteProduct);
 
+// ============================================================
+// BRANCH PRODUCT ROUTES
+// ============================================================
+
+router.get('/branches/:branchId/products', productController.getBranchProducts);
+router.patch('/branches/:branchId/products/:productId/stock', productController.updateBranchProductStock);
+
 // Sale routes
 router.post('/sales', saleController.createSale);
 router.get('/sales', saleController.getSales);

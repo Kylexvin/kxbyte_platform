@@ -96,11 +96,13 @@ model Organization {
   kxtillProducts    KxTillProduct[]
   kxtillSales       KxTillSale[]
   kxtillStoreSetting KxTillStoreSetting?
+  branches       Branch[]
 
   @@index([ownerId])
   @@index([slug])
   @@map("organizations")
 }
+
 model Membership {
   id             String   @id @default(uuid())
   userId         String
@@ -112,6 +114,10 @@ model Membership {
   isActive       Boolean  @default(true)
   joinedAt       DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  hasAllBranches Boolean  @default(false)
+  branchAssignments BranchAssignment[]
+
 
   @@unique([userId, organizationId])
   @@index([userId])
@@ -502,17 +508,11 @@ model KxTillProduct {
   isActive       Boolean  @default(true)
   trackInventory Boolean  @default(true)
 
-  // Base unit (single field, with @unique)
   baseUnitId     String?  @unique
   baseUnit       KxTillProductUnit? @relation("KxTillBaseUnit", fields: [baseUnitId], references: [id])
-
-  // All units configured for this product
   units          KxTillProductUnit[] @relation("KxTillProductUnits")
 
-  // Current stock, always stored in base units
-  stock          Decimal  @default(0)
-  minStock       Decimal  @default(0)
-
+  branchProducts KxTillBranchProduct[]
   saleItems      KxTillSaleItem[]
 
   createdAt      DateTime @default(now())
@@ -524,6 +524,55 @@ model KxTillProduct {
 }
 
 
+// ============================================================
+// KXTILL - BRANCH PRODUCTS & INVENTORY
+// ============================================================
+
+model KxTillBranchProduct {
+  id             String   @id @default(uuid())
+  productId      String
+  product        KxTillProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branchId       String
+  branch         Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  displayName    String?
+  description    String?
+  isAvailable    Boolean  @default(true)
+  stock          Decimal  @default(0)
+  minStock       Decimal  @default(0)
+
+  unitPrices     KxTillBranchProductUnitPrice[]
+  saleItems      KxTillSaleItem[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([productId, branchId])
+  @@index([productId])
+  @@index([branchId])
+  @@map("kxtill_branch_products")
+}
+
+// ============================================================
+// KXTILL - BRANCH PRODUCT UNIT PRICES
+// ============================================================
+
+model KxTillBranchProductUnitPrice {
+  id               String   @id @default(uuid())
+  branchProductId  String
+  branchProduct    KxTillBranchProduct @relation(fields: [branchProductId], references: [id], onDelete: Cascade)
+  unitId           String
+  unit             KxTillProductUnit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  price            Decimal
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([branchProductId, unitId])
+  @@index([branchProductId])
+  @@index([unitId])
+  @@map("kxtill_branch_product_unit_prices")
+}
 // ============================================================
 // KXTILL - PRODUCT UNITS
 // ============================================================
@@ -545,13 +594,13 @@ model KxTillProductUnit {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   saleItems        KxTillSaleItem[]
+  branchUnitPrices KxTillBranchProductUnitPrice[]
 
   @@unique([productId, name])
   @@unique([productId, abbreviation])
   @@index([productId])
   @@map("kxtill_product_units")
 }
-
 
 // ============================================================
 // KXTILL - SALES
@@ -563,6 +612,10 @@ model KxTillSale {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  // ✅ Required
+  branchId       String
+  branch         Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
 
   subtotal       Decimal
   taxAmount      Decimal  @default(0)
@@ -579,12 +632,12 @@ model KxTillSale {
 
   @@index([organizationId])
   @@index([userId])
+  @@index([branchId])
   @@index([status])
   @@index([paymentStatus])
   @@index([createdAt])
   @@map("kxtill_sales")
 }
-
 
 // ============================================================
 // KXTILL - SALE ITEMS
@@ -592,55 +645,31 @@ model KxTillSale {
 
 model KxTillSaleItem {
   id             String   @id @default(uuid())
-
   saleId         String
   sale           KxTillSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
 
   productId      String
   product        KxTillProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
 
-  // Unit selected by the attendant
+  // ✅ Required
+  branchProductId String
+  branchProduct   KxTillBranchProduct @relation(fields: [branchProductId], references: [id], onDelete: Restrict)
+
   unitId         String
   unit           KxTillProductUnit @relation(fields: [unitId], references: [id])
 
-  // Historical snapshots.
-  // These protect old sales if the product/unit is later changed.
+  // Historical snapshots
   unitName       String
   unitAbbrev     String
   unitType       String
-
-  // Quantity sold in the selected unit.
-  //
-  // Examples:
-  // 2 pieces
-  // 3 cartons
-  // 0.5 piece
-  // 2 x 500g bags
   quantity       Decimal
-
-  // Conversion at the exact time of sale.
-  //
-  // Examples:
-  // Carton = 12 pieces
-  // 500g   = 0.5kg
   conversionQty  Decimal
-
-  // Price at the exact time of sale.
   unitPrice      Decimal
-
-  // Final quantity deducted from inventory.
-  //
-  // baseQuantity = quantity × conversionQty
-  //
-  // Example:
-  // 2 cartons × 12 pieces = 24 pieces
-  // 3 × 500g × 0.5kg = 1.5kg
   baseQuantity   Decimal
 
   taxRate        Decimal  @default(0)
   taxAmount      Decimal  @default(0)
   discount       Decimal  @default(0)
-
   total          Decimal
 
   createdAt      DateTime @default(now())
@@ -648,10 +677,10 @@ model KxTillSaleItem {
 
   @@index([saleId])
   @@index([productId])
+  @@index([branchProductId])
   @@index([unitId])
   @@map("kxtill_sale_items")
 }
-
 
 // ============================================================
 // KXTILL - SALE PAYMENTS
@@ -680,6 +709,8 @@ model KxTillSalePayment {
   @@map("kxtill_sale_payments")
 }
 
+
+
 // ============================================================
 // KXTILL - STORE SETTINGS
 // ============================================================
@@ -705,4 +736,51 @@ model KxTillStoreSetting {
   updatedAt      DateTime @updatedAt
 
   @@map("kxtill_store_settings")
+}
+
+// ============================================================
+// BRANCH MANAGEMENT
+// ============================================================
+
+model Branch {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name           String
+  code           String
+  address        String?
+  phone          String?
+  email          String?
+
+  isActive       Boolean      @default(true)
+  isDefault      Boolean      @default(false)
+
+  assignments    BranchAssignment[]
+  sales          KxTillSale[]
+  branchProducts KxTillBranchProduct[]
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+  @@map("branches")
+}
+
+model BranchAssignment {
+  id           String     @id @default(uuid())
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  branchId     String
+  branch       Branch     @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([membershipId, branchId])
+  @@index([membershipId])
+  @@index([branchId])
+  @@map("branch_assignments")
 }

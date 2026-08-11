@@ -4,6 +4,7 @@ import productDb from '../db/product.db.js';
 import orgDb from '../../../platform/organizations/db/org.db.js';
 import audit from '../../../platform/audit/index.js';
 import authorizationService from '../../../platform/authorization/services/authorization.service.js';
+import prisma from '../../../../database/postgres/prisma.js';
 
 // ============================================================
 // HELPER: Check permission
@@ -33,17 +34,15 @@ const createProduct = async (userId, organizationId, data) => {
     throw new Error('You do not have permission to create products');
   }
 
-  // Create product — taxRate optional, defaults to 0
+  // Create product
   const product = await productDb.createProduct({
     organizationId,
     name: data.name,
     sku: data.sku,
     description: data.description,
     category: data.category,
-    taxRate: 0,  // ← Always 0
+    taxRate: 0,
     trackInventory: data.trackInventory !== undefined ? data.trackInventory : true,
-    stock: data.stock || 0,
-    minStock: data.minStock || 0,
   });
 
   // Create base unit if provided
@@ -81,6 +80,24 @@ const createProduct = async (userId, organizationId, data) => {
   const baseUnitId = units.find(u => u.isBaseUnit)?.id;
   if (baseUnitId) {
     await productDb.updateProduct(product.id, organizationId, { baseUnitId });
+  }
+
+  // ✅ Create branch products for all active branches
+  const branches = await prisma.branch.findMany({
+    where: { organizationId, isActive: true },
+  });
+
+  for (const branch of branches) {
+    await prisma.kxTillBranchProduct.create({
+      data: {
+        productId: product.id,
+        branchId: branch.id,
+        displayName: data.name,
+        stock: data.stock || 0,
+        minStock: data.minStock || 0,
+        isAvailable: true,
+      },
+    });
   }
 
   const completeProduct = await productDb.findProductById(product.id, organizationId);
@@ -186,6 +203,143 @@ const getLowStockProducts = async (organizationId, userId) => {
   return productDb.getLowStockProducts(organizationId);
 };
 
+// ============================================================
+// BRANCH PRODUCTS
+// ============================================================
+
+const getBranchProducts = async (organizationId, userId, branchId, filters = {}) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  // Check if user has access to this branch
+  const hasBranchAccess = await prisma.branchAssignment.findUnique({
+    where: {
+      membershipId_branchId: {
+        membershipId: membership.id,
+        branchId,
+      },
+    },
+  });
+
+  if (!membership.hasAllBranches && !hasBranchAccess) {
+    throw new Error('You do not have access to this branch');
+  }
+
+  const { limit = 50, offset = 0, search, category } = filters;
+  const where = {
+    branchId,
+    product: {
+      organizationId,
+      isActive: true,
+    },
+    isAvailable: true,
+  };
+
+  if (search) {
+    where.product.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { sku: { contains: search, mode: 'insensitive' } },
+    ];
+  }
+  if (category) {
+    where.product.category = category;
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.kxTillBranchProduct.findMany({
+      where,
+      include: {
+        product: {
+          include: {
+            units: true,
+            baseUnit: true,
+          },
+        },
+      },
+      orderBy: {
+        product: {
+          name: 'asc',
+        },
+      },
+      skip: offset,
+      take: limit,
+    }),
+    prisma.kxTillBranchProduct.count({ where }),
+  ]);
+
+  return {
+    items: items.map((bp) => ({
+      id: bp.id,
+      productId: bp.productId,
+      name: bp.product.name,
+      displayName: bp.displayName,
+      sku: bp.product.sku,
+      category: bp.product.category,
+      price: bp.price,
+      stock: bp.stock,
+      minStock: bp.minStock,
+      isAvailable: bp.isAvailable,
+      units: bp.product.units,
+      baseUnit: bp.product.baseUnit,
+    })),
+    total,
+    limit,
+    offset,
+  };
+};
+
+const updateBranchProductStock = async (organizationId, userId, branchId, productId, stockData) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.inventory.update');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to update inventory');
+  }
+
+  const branchProduct = await prisma.kxTillBranchProduct.findFirst({
+    where: {
+      productId,
+      branchId,
+      product: {
+        organizationId,
+      },
+    },
+  });
+
+  if (!branchProduct) {
+    throw new Error('Branch product not found');
+  }
+
+  const updated = await prisma.kxTillBranchProduct.update({
+    where: { id: branchProduct.id },
+    data: {
+      stock: stockData.stock,
+      minStock: stockData.minStock !== undefined ? stockData.minStock : branchProduct.minStock,
+    },
+  });
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'KXTILL_BRANCH_STOCK_UPDATED',
+    resource: 'branch_product',
+    resourceId: branchProduct.id,
+    metadata: {
+      productId,
+      branchId,
+      oldStock: branchProduct.stock,
+      newStock: stockData.stock,
+    },
+  });
+
+  return updated;
+};
+
 export default {
   createProduct,
   getProducts,
@@ -193,4 +347,6 @@ export default {
   updateProduct,
   deleteProduct,
   getLowStockProducts,
+  getBranchProducts,
+  updateBranchProductStock,
 };

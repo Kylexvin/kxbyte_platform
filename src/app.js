@@ -17,6 +17,7 @@ import subscription from './modules/platform/subscriptions/index.js';
 import audit from './modules/platform/audit/index.js';
 import notifications from './modules/platform/notifications/index.js';
 import payment from './modules/platform/payment/index.js';
+import branches from './modules/platform/branches/index.js';
 
 // ============================================================
 // PRODUCTS
@@ -51,6 +52,7 @@ subscription.register(app);
 audit.register(app);
 notifications.register(app);
 payment.register(app);
+branches.register(app);
 
 // ============================================================
 // KXTILL ROUTE REGISTRATION

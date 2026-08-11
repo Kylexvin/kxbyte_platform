@@ -154,6 +154,86 @@ const getLowStockProducts = async (req, res) => {
   }
 };
 
+// ============================================================
+// BRANCH PRODUCT CONTROLLERS
+// ============================================================
+
+const getBranchProducts = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, branchId } = req.params;
+    const { limit, offset, search, category } = req.query;
+
+    const result = await productService.getBranchProducts(
+      organizationId,
+      userId,
+      branchId,
+      {
+        limit: limit ? parseInt(limit) : 50,
+        offset: offset ? parseInt(offset) : 0,
+        search,
+        category,
+      }
+    );
+
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'You do not have access to this branch') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Get branch products error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const updateBranchProductStock = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, branchId, productId } = req.params;
+    const { stock, minStock } = req.body;
+
+    if (stock === undefined) {
+      return res.status(400).json({ error: 'Stock is required' });
+    }
+
+    const result = await productService.updateBranchProductStock(
+      organizationId,
+      userId,
+      branchId,
+      productId,
+      { stock, minStock }
+    );
+
+    res.status(200).json({ message: 'Stock updated successfully', result });
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'You do not have access to this branch') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'Branch product not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    if (error.message === 'You do not have permission to update inventory') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Update branch product stock error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   createProduct,
   getProducts,
@@ -161,4 +241,6 @@ export default {
   updateProduct,
   deleteProduct,
   getLowStockProducts,
+  getBranchProducts,
+  updateBranchProductStock,
 };
