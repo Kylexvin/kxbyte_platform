@@ -5,6 +5,36 @@ import permissionDb from '../db/permission.db.js';
 import orgDb from '../../organizations/db/org.db.js';
 import audit from '../../audit/index.js';
 
+// ============================================================
+// USER PERMISSIONS
+// ============================================================
+
+const getAllUserPermissions = async (userId, organizationId) => {
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (!organization) {
+    return [];
+  }
+
+  // Owner has all permissions
+  if (organization.ownerId === userId) {
+    const allPermissions = await permissionDb.findAllPermissions();
+    return allPermissions.map(p => p.key);
+  }
+
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership || !membership.isActive || !membership.roleId) {
+    return [];
+  }
+
+  const role = await roleDb.findRoleById(membership.roleId);
+  if (!role) {
+    return [];
+  }
+
+  const rolePermissions = role.permissions || [];
+  return rolePermissions.map(rp => rp.permission.key);
+};
+
 const checkPermission = async (userId, organizationId, permissionKey) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -343,4 +373,5 @@ export default {
   addPermissionToRole,
   removePermissionFromRole,
   assignRoleToMember,
+  getAllUserPermissions,
 };

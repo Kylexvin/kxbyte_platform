@@ -285,6 +285,7 @@ const getUserBranches = async (userId, organizationId) => {
   return assignments.map(a => a.branch);
 };
 
+
 export default {
   createBranch,
   getBranches,

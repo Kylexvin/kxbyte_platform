@@ -73,6 +73,7 @@ const findPermissionById = async (id) => {
   });
 };
 
+
 export default {
   createPermission,
   createManyPermissions,

@@ -8,6 +8,9 @@ const router = express.Router({ mergeParams: true });
 
 router.use(authMiddleware.authenticate);
 
+// User's own accessible branches
+router.get('/my', branchController.getMyBranches);
+
 // Branch CRUD
 router.post('/', branchController.createBranch);
 router.get('/', branchController.getBranches);

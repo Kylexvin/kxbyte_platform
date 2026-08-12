@@ -244,6 +244,28 @@ const getMemberBranches = async (req, res) => {
   }
 };
 
+// src/modules/platform/branches/controllers/branch.controller.js
+
+const getMyBranches = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const branches = await branchService.getUserBranches(userId, organizationId);
+    res.status(200).json({ branches });
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Get my branches error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+
 export default {
   createBranch,
   getBranches,
@@ -253,4 +275,5 @@ export default {
   assignBranchToMember,
   removeBranchFromMember,
   getMemberBranches,
+  getMyBranches,
 };
