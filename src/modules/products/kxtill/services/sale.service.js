@@ -5,6 +5,7 @@ import productDb from '../db/product.db.js';
 import orgDb from '../../../platform/organizations/db/org.db.js';
 import audit from '../../../platform/audit/index.js';
 import authorizationService from '../../../platform/authorization/services/authorization.service.js';
+import prisma from '../../../../database/postgres/prisma.js';
 
 const checkPermission = async (userId, organizationId, permissionKey) => {
   return authorizationService.checkPermission(userId, organizationId, permissionKey);
@@ -27,7 +28,11 @@ const createSale = async (userId, organizationId, data) => {
   }
 
   let subtotal = 0;
+  let taxAmount = 0;
   const saleItems = [];
+
+  // ✅ Declare branchProduct outside loop so it's accessible later
+  let currentBranchProduct = null;
 
   for (const item of data.items) {
     const product = await productDb.findProductById(item.productId, organizationId);
@@ -45,12 +50,27 @@ const createSale = async (userId, organizationId, data) => {
     const baseQuantity = quantity * conversionQty;
     const unitPrice = Number(unit.price || product.price);
 
-    if (product.trackInventory && product.stock < baseQuantity) {
-      throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stock} ${product.baseUnit?.abbreviation || 'units'}`);
+    // Check branch inventory
+    const branchProduct = await prisma.kxTillBranchProduct.findFirst({
+      where: {
+        productId: product.id,
+        branchId: data.branchId,
+      },
+    });
+
+    if (!branchProduct) {
+      throw new Error(`Product ${product.name} is not available at this branch`);
+    }
+
+    if (branchProduct.stock < baseQuantity) {
+      throw new Error(`Insufficient stock for ${product.name}. Available: ${branchProduct.stock} ${product.baseUnit?.abbreviation || 'units'}`);
     }
 
     const total = quantity * unitPrice;
+    const tax = total * (Number(product.taxRate) / 100);
+
     subtotal += total;
+    taxAmount += tax;
 
     saleItems.push({
       productId: product.id,
@@ -62,34 +82,41 @@ const createSale = async (userId, organizationId, data) => {
       conversionQty: conversionQty,
       unitPrice: unitPrice,
       baseQuantity: baseQuantity,
-      taxRate: 0,
-      taxAmount: 0,
+      taxRate: Number(product.taxRate),
+      taxAmount: tax,
       discount: 0,
-      total: total,
+      total: total + tax,
     });
 
-    if (product.trackInventory) {
-      await productDb.updateStock(product.id, -baseQuantity);
-    }
+    // Update branch inventory
+    await prisma.kxTillBranchProduct.update({
+      where: { id: branchProduct.id },
+      data: { stock: { decrement: baseQuantity } },
+    });
+
+    // ✅ Store for later use
+    currentBranchProduct = branchProduct;
   }
 
-  const totalAmount = subtotal;
+  const totalAmount = subtotal + taxAmount;
 
   const sale = await saleDb.createSale({
     organizationId,
     userId,
     subtotal,
-    taxAmount: 0,
+    taxAmount,
     discount: 0,
     totalAmount,
     status: 'COMPLETED',
     paymentStatus: 'PAID',
+    branchId: data.branchId,
   });
 
   for (const item of saleItems) {
     await saleDb.createSaleItem({
       ...item,
       saleId: sale.id,
+      branchProductId: currentBranchProduct?.id,
     });
   }
 

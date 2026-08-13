@@ -1,10 +1,14 @@
 // src/modules/platform/organizations/services/org.service.js
 
 import orgDb from '../db/org.db.js';
+import authorizationService from '../../authorization/services/authorization.service.js';
+import roleDb from '../../authorization/db/role.db.js';
 import { getCountryDefaults } from '../utils/country.utils.js';
 import { generateSlug } from '../utils/slug.utils.js';
 import audit from '../../audit/index.js';
 import prisma from '../../../../database/postgres/prisma.js';
+
+
 
 const createOrganization = async (userId, data) => {
   const { name, country } = data;
@@ -78,7 +82,36 @@ const createOrganization = async (userId, data) => {
 
 const getOrganizations = async (userId) => {
   const organizations = await orgDb.findOrganizationsByUserId(userId);
-  return organizations;
+
+  const enriched = await Promise.all(
+    organizations.map(async (org) => {
+      const permissions = await authorizationService.getAllUserPermissions(
+        userId,
+        org.id
+      );
+
+      const membership = await orgDb.findMembership(userId, org.id);
+      const role = membership?.roleId
+        ? await roleDb.findRoleById(membership.roleId)
+        : null;
+
+      // Determine role name
+      let roleName = 'Member';
+      if (org.ownerId === userId) {
+        roleName = 'Owner';
+      } else if (role) {
+        roleName = role.name;
+      }
+
+      return {
+        ...org,
+        permissions,
+        role: roleName,
+      };
+    })
+  );
+
+  return enriched;
 };
 
 const getOrganizationById = async (organizationId, userId) => {

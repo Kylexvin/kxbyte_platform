@@ -49,6 +49,8 @@ const findOrganizationsByUserId = async (userId) => {
           isActive: true,
         },
       },
+      isActive: true,
+      isArchived: false, // ✅ Exclude archived orgs
     },
     orderBy: { createdAt: 'desc' },
   });

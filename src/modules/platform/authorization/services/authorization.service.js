@@ -15,10 +15,9 @@ const getAllUserPermissions = async (userId, organizationId) => {
     return [];
   }
 
-  // Owner has all permissions
+  // Owner has all permissions → return ["*"]
   if (organization.ownerId === userId) {
-    const allPermissions = await permissionDb.findAllPermissions();
-    return allPermissions.map(p => p.key);
+    return ["*"];
   }
 
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -362,6 +361,7 @@ const assignRoleToMember = async (organizationId, userId, memberId, roleId) => {
 
   return updated;
 };
+
 
 export default {
   checkPermission,
