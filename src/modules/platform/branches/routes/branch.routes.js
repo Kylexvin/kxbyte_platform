@@ -18,9 +18,11 @@ router.get('/:branchId', branchController.getBranch);
 router.patch('/:branchId', branchController.updateBranch);
 router.delete('/:branchId', branchController.deleteBranch);
 
+
 // Branch assignments
 router.post('/:branchId/assign', branchController.assignBranchToMember);
 router.delete('/:branchId/assign', branchController.removeBranchFromMember);
 router.get('/members/:memberId/branches', branchController.getMemberBranches);
+router.get('/:branchId/members', branchController.getBranchMembers);
 
 export default router;

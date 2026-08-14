@@ -2,6 +2,8 @@
 
 import branchService from '../services/branch.service.js';
 import branchValidator from '../validators/branch.validator.js';
+import orgDb from '../../organizations/db/org.db.js';
+import branchDb from '../db/branch.db.js';
 
 // ============================================================
 // BRANCH CRUD
@@ -244,7 +246,6 @@ const getMemberBranches = async (req, res) => {
   }
 };
 
-// src/modules/platform/branches/controllers/branch.controller.js
 
 const getMyBranches = async (req, res) => {
   try {
@@ -265,6 +266,49 @@ const getMyBranches = async (req, res) => {
   }
 };
 
+const getBranchMembers = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, branchId } = req.params;
+
+    // Check if user has access to organization
+    const membership = await orgDb.findMembership(userId, organizationId);
+    if (!membership) {
+      return res.status(403).json({ error: 'You do not have access to this organization' });
+    }
+
+    // Check if branch exists
+    const branch = await branchDb.findBranchById(branchId, organizationId);
+    if (!branch) {
+      return res.status(404).json({ error: 'Branch not found' });
+    }
+
+    // Get members assigned to this branch
+    const assignments = await branchDb.findAssignmentsByBranch(branchId);
+    const members = assignments.map(a => ({
+      id: a.membership.id,
+      userId: a.membership.userId,
+      user: {
+        id: a.membership.user.id,
+        email: a.membership.user.email,
+        firstName: a.membership.user.firstName,
+        lastName: a.membership.user.lastName,
+      },
+      roleId: a.membership.roleId,
+      isActive: a.membership.isActive,
+      joinedAt: a.membership.joinedAt,
+    }));
+
+    res.status(200).json({ members });
+  } catch (error) {
+    console.error('Get branch members error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
 
 export default {
   createBranch,
@@ -276,4 +320,6 @@ export default {
   removeBranchFromMember,
   getMemberBranches,
   getMyBranches,
+  getBranchMembers,
+
 };

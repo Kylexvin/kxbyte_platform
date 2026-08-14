@@ -3,8 +3,10 @@
 import productDb from '../db/product.db.js';
 import orgDb from '../../organizations/db/org.db.js';
 import planDb from '../../subscriptions/db/plan.db.js';
+import subscriptionDb from '../../subscriptions/db/subscription.db.js';
 import subscriptionService from '../../subscriptions/services/subscription.service.js';
 import audit from '../../audit/index.js';
+import { addDays } from 'date-fns';
 
 const createSubscriptionForProduct = async (organizationId, productKey) => {
   try {
@@ -26,6 +28,33 @@ const createSubscriptionForProduct = async (organizationId, productKey) => {
     } else {
       console.error(`Failed to create subscription for ${productKey}:`, error.message);
     }
+  }
+};
+
+const reactivateSubscription = async (organizationId, productKey) => {
+  try {
+    const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
+    
+    if (!subscription) {
+      await createSubscriptionForProduct(organizationId, productKey);
+      return;
+    }
+
+    // ✅ Only reactivate if cancelled or expired
+    if (subscription.status === 'CANCELLED' || subscription.status === 'EXPIRED') {
+      // ✅ Keep existing dates, just change status
+      await subscriptionDb.updateSubscription(subscription.id, {
+        status: 'ACTIVE',
+        cancelledAt: null,
+        expiredAt: null,
+        // ✅ DO NOT reset currentPeriodStart/currentPeriodEnd
+        // ✅ DO NOT reset trialStart/trialEnd
+      });
+      
+      console.log(`✅ Subscription reactivated for ${productKey}`);
+    }
+  } catch (error) {
+    console.error(`Failed to reactivate subscription for ${productKey}:`, error.message);
   }
 };
 
@@ -79,16 +108,13 @@ const activateProduct = async (organizationId, userId, productKey) => {
 
   let result;
 
-  // Handle reactivation
   if (existing) {
     if (existing.isActive) {
       throw new Error('Product is already activated for this organization');
     }
     // Reactivate
     await productDb.updateOrganizationProduct(organizationId, product.id, { isActive: true });
-
-    // Create subscription on reactivation
-    await createSubscriptionForProduct(organizationId, productKey);
+    await reactivateSubscription(organizationId, productKey);
 
     result = {
       organizationId,
@@ -106,7 +132,6 @@ const activateProduct = async (organizationId, userId, productKey) => {
       isActive: true,
     });
 
-    // Create subscription
     await createSubscriptionForProduct(organizationId, productKey);
 
     result = {
@@ -134,6 +159,7 @@ const activateProduct = async (organizationId, userId, productKey) => {
   return result;
 };
 
+
 const deactivateProduct = async (organizationId, userId, productKey) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -154,9 +180,20 @@ const deactivateProduct = async (organizationId, userId, productKey) => {
     throw new Error('Product is not activated for this organization');
   }
 
+  // ✅ Deactivate organization product
   await productDb.deactivateOrganizationProduct(organizationId, product.id);
 
-  // Audit log: Product deactivated
+  // ✅ ALSO cancel the subscription
+  const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (subscription && subscription.status !== 'CANCELLED') {
+    await subscriptionDb.updateSubscription(subscription.id, {
+      status: 'CANCELLED',
+      cancelledAt: new Date(),
+    });
+    console.log(`✅ Subscription cancelled for ${productKey}`);
+  }
+
+  // Audit log
   await audit.log({
     organizationId: organization.id,
     userId: userId,
