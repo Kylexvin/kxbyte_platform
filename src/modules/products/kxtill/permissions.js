@@ -82,6 +82,11 @@ const permissions = [
     name: 'Export Reports',
     description: 'Export KxTill reports',
   },
+  {
+  key: 'audit.logs.export',
+  name: 'Export Audit Logs',
+  description: 'Export audit logs for the organization',
+},
 
   // ============================================================
   // SETTINGS

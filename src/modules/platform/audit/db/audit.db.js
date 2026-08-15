@@ -102,10 +102,84 @@ const findAuditEventById = async (id) => {
   });
 };
 
-const countAuditEvents = async (organizationId) => {
-  const where = {};
-  if (organizationId) where.organizationId = organizationId;
+const countAuditEvents = async (organizationId, since = null) => {
+  const where = { organizationId };
+  if (since) where.createdAt = { gte: since };
   return prisma.auditEvent.count({ where });
+};
+
+const getAuditStats = async (organizationId) => {
+  const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  const weekStart = new Date(now);
+  weekStart.setDate(weekStart.getDate() - 7);
+  weekStart.setHours(0, 0, 0, 0);
+
+  const [total, thisWeek, today, activeUsers] = await Promise.all([
+    prisma.auditEvent.count({ where: { organizationId } }),
+    prisma.auditEvent.count({
+      where: {
+        organizationId,
+        createdAt: { gte: weekStart },
+      },
+    }),
+    prisma.auditEvent.count({
+      where: {
+        organizationId,
+        createdAt: { gte: todayStart },
+      },
+    }),
+    prisma.auditEvent.groupBy({
+      by: ['userId'],
+      where: {
+        organizationId,
+        userId: { not: null },
+        createdAt: { gte: weekStart },
+      },
+    }).then((groups) => groups.length),
+  ]);
+
+  return { total, thisWeek, today, activeUsers };
+};
+
+const exportAuditLogs = async (organizationId, filters = {}) => {
+  const { startDate, endDate, action, userId, search } = filters;
+  const where = { organizationId };
+
+  if (startDate) where.createdAt = { gte: new Date(startDate) };
+  if (endDate) where.createdAt = { ...where.createdAt, lte: new Date(endDate) };
+  if (action) where.action = { contains: action, mode: 'insensitive' };
+  if (userId) where.userId = userId;
+  if (search) {
+    where.OR = [
+      { action: { contains: search, mode: 'insensitive' } },
+      { resource: { contains: search, mode: 'insensitive' } },
+      { user: { email: { contains: search, mode: 'insensitive' } } },
+    ];
+  }
+
+  return prisma.auditEvent.findMany({
+    where,
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      organization: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
 };
 
 export default {
@@ -113,4 +187,6 @@ export default {
   findAuditEvents,
   findAuditEventById,
   countAuditEvents,
+  getAuditStats,
+  exportAuditLogs,
 };

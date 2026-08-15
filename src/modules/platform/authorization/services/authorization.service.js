@@ -98,7 +98,7 @@ const checkPermissions = async (userId, organizationId, permissionKeys) => {
 };
 
 // ============================================================
-// ROLE MANAGEMENT — WITH AUDIT LOGS
+// ROLE MANAGEMENT — WITH AUDIT LOGS 
 // ============================================================
 
 const createRole = async (organizationId, userId, data) => {

@@ -3,6 +3,9 @@
 import express from 'express';
 import branchController from '../controllers/branch.controller.js';
 import authMiddleware from '../../identity/middleware/auth.middleware.js';
+import branchActivityController from '../controllers/branch-activity.controller.js';
+
+
 
 const router = express.Router({ mergeParams: true });
 
@@ -14,6 +17,7 @@ router.get('/my', branchController.getMyBranches);
 // Branch CRUD
 router.post('/', branchController.createBranch);
 router.get('/', branchController.getBranches);
+router.get('/activity', branchActivityController.getBranchActivity);
 router.get('/:branchId', branchController.getBranch);
 router.patch('/:branchId', branchController.updateBranch);
 router.delete('/:branchId', branchController.deleteBranch);

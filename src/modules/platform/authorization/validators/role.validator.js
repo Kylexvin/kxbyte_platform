@@ -21,8 +21,12 @@ const validateCreateRole = (data) => {
 const validateUpdateRole = (data) => {
   const errors = [];
 
-  if (data.name !== undefined && data.name.trim().length < 2) {
+  if (data.name !== undefined && data.name.length < 2) {
     errors.push('Role name must be at least 2 characters');
+  }
+
+  if (data.permissionKeys !== undefined && !Array.isArray(data.permissionKeys)) {
+    errors.push('Permissions must be an array');
   }
 
   return {

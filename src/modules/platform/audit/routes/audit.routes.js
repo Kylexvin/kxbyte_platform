@@ -12,6 +12,8 @@ router.use(authMiddleware.authenticate);
 // Audit log routes
 router.get('/', auditController.getAuditEvents);
 router.get('/stats', auditController.getAuditStats);
+router.get('/export', auditController.exportAuditLogs);
+router.get('/', auditController.getAuditEvents);
 router.get('/:eventId', auditController.getAuditEvent);
 
 export default router;

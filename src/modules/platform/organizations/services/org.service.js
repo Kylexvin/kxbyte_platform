@@ -212,6 +212,23 @@ const archiveOrganization = async (organizationId, userId) => {
   return archived;
 };
 
+const getArchivedOrganizations = async (userId) => {
+  return orgDb.findArchivedOrganizationsByUserId(userId);
+};
+
+const restoreOrganization = async (organizationId, userId) => {
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (!organization) {
+    throw new Error('Organization not found');
+  }
+
+  if (organization.ownerId !== userId) {
+    throw new Error('Only the organization owner can restore this organization');
+  }
+
+  return orgDb.restoreOrganization(organizationId);
+};
+
 const getOrganizationMembers = async (organizationId, userId) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
@@ -265,6 +282,8 @@ export default {
   getOrganizationBySlug,
   updateOrganization,
   archiveOrganization,
+  getArchivedOrganizations,  
+  restoreOrganization,
   getOrganizationMembers,
   removeMember,
 };

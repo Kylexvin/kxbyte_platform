@@ -3,11 +3,11 @@
 import roleDb from '../db/role.db.js';
 import permissionDb from '../db/permission.db.js';
 import orgDb from '../../organizations/db/org.db.js';
+import audit from '../../audit/index.js';
 
 const createRole = async (organizationId, userId, data) => {
-  const { name, description } = data;
+  const { name, description, permissionKeys } = data;
 
-  // Check if user is owner
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
@@ -23,11 +23,38 @@ const createRole = async (organizationId, userId, data) => {
     throw new Error('A role with this name already exists');
   }
 
-  return roleDb.createRole({
+  // Create role
+  const role = await roleDb.createRole({
     organizationId,
     name,
     description: description || '',
   });
+
+  // ✅ Assign permissions if provided
+  if (permissionKeys && Array.isArray(permissionKeys) && permissionKeys.length > 0) {
+    for (const key of permissionKeys) {
+      const permission = await permissionDb.findPermissionByKey(key);
+      if (permission) {
+        await roleDb.addPermissionToRole(role.id, permission.id);
+      }
+    }
+  }
+
+  // Audit log
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'ROLE_CREATED',
+    resource: 'role',
+    resourceId: role.id,
+    metadata: {
+      name: role.name,
+      permissionCount: permissionKeys?.length || 0,
+    },
+  });
+
+  // Return role with permissions
+  return roleDb.findRoleById(role.id);
 };
 
 const getRoles = async (organizationId, userId) => {
@@ -67,6 +94,8 @@ const getRole = async (organizationId, userId, roleId) => {
   return role;
 };
 
+// src/modules/platform/authorization/services/role.service.js
+
 const updateRole = async (organizationId, userId, roleId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -86,6 +115,7 @@ const updateRole = async (organizationId, userId, roleId, data) => {
     throw new Error('Role does not belong to this organization');
   }
 
+  // Check duplicate name
   if (data.name && data.name !== role.name) {
     const existing = await roleDb.findRoleByOrgAndName(organizationId, data.name);
     if (existing) {
@@ -93,11 +123,56 @@ const updateRole = async (organizationId, userId, roleId, data) => {
     }
   }
 
+  // Update role name/description
   const updateData = {};
   if (data.name !== undefined) updateData.name = data.name;
   if (data.description !== undefined) updateData.description = data.description;
 
-  return roleDb.updateRole(roleId, updateData);
+  const updated = await roleDb.updateRole(roleId, updateData);
+
+  // ✅ Sync permissions if provided
+  if (data.permissionKeys && Array.isArray(data.permissionKeys)) {
+    // Get current permissions
+    const currentPerms = await roleDb.findRolePermissions(roleId);
+    const currentKeys = currentPerms.map((rp) => rp.permission.key);
+
+    // Find permissions to add and remove
+    const toAdd = data.permissionKeys.filter((key) => !currentKeys.includes(key));
+    const toRemove = currentKeys.filter((key) => !data.permissionKeys.includes(key));
+
+    // Add new permissions
+    for (const key of toAdd) {
+      const permission = await permissionDb.findPermissionByKey(key);
+      if (permission) {
+        await roleDb.addPermissionToRole(roleId, permission.id);
+      }
+    }
+
+    // Remove old permissions
+    for (const key of toRemove) {
+      const permission = await permissionDb.findPermissionByKey(key);
+      if (permission) {
+        await roleDb.removePermissionFromRole(roleId, permission.id);
+      }
+    }
+  }
+
+  // Audit log
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'ROLE_UPDATED',
+    resource: 'role',
+    resourceId: roleId,
+    metadata: {
+      name: updated.name,
+      previousName: role.name,
+      permissionsUpdated: data.permissionKeys !== undefined,
+    },
+  });
+
+  // Return updated role with permissions
+  return roleDb.findRoleById(roleId);
 };
 
 const deleteRole = async (organizationId, userId, roleId) => {

@@ -87,6 +87,44 @@ const getMe = async (req, res) => {
   }
 };
 
+const revokeSession = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { sessionId } = req.params;
+    const result = await authService.revokeSession(userId, sessionId);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'Session not found' || error.message === 'Cannot revoke current session') {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Revoke session error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const updateProfile = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { firstName, lastName } = req.body;
+    const result = await authService.updateProfile(userId, { firstName, lastName });
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Update profile error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 const forgotPassword = async (req, res) => {
   const validation = authValidator.validateForgotPassword(req.body);
   if (!validation.valid) {
@@ -203,10 +241,12 @@ export default {
   refresh,
   logout,
   getMe,
+  updateProfile,
   forgotPassword,
   resetPassword,
   verifyEmail,
   changePassword,
   getSessions,
   logoutAllDevices,
+  revokeSession,
 };

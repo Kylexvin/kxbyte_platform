@@ -2,6 +2,7 @@
 
 import auditDb from '../db/audit.db.js';
 import orgDb from '../../organizations/db/org.db.js';
+import prisma from '../../../../database/postgres/prisma.js';
 
 const log = async (data) => {
   const {
@@ -65,26 +66,51 @@ const getAuditEventById = async (eventId) => {
 };
 
 const getAuditStats = async (organizationId) => {
-  const total = await auditDb.countAuditEvents(organizationId);
+  const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
 
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const weekStart = new Date(now);
+  weekStart.setDate(weekStart.getDate() - 7);
+  weekStart.setHours(0, 0, 0, 0);
 
-  const recent = await auditDb.findAuditEvents({
-    organizationId,
-    startDate: sevenDaysAgo,
-    limit: 1,
-  });
+  const [total, thisWeek, today, activeUsers] = await Promise.all([
+    auditDb.countAuditEvents(organizationId),
+    auditDb.countAuditEvents(organizationId, weekStart),
+    auditDb.countAuditEvents(organizationId, todayStart),
+    // Active users = unique users with events in the last 7 days
+    prisma.auditEvent.groupBy({
+      by: ['userId'],
+      where: {
+        organizationId,
+        userId: { not: null },
+        createdAt: { gte: weekStart },
+      },
+    }).then((groups) => groups.length),
+  ]);
 
-  return {
-    total,
-    recentCount: recent.total,
-  };
+  return { total, thisWeek, today, activeUsers };
 };
 
+
+const exportAuditLogs = async (organizationId, filters = {}) => {
+  const logs = await auditDb.exportAuditLogs(organizationId, filters);
+  return logs.map((log) => ({
+    time: log.createdAt,
+    user: log.user ? `${log.user.firstName} ${log.user.lastName}` : 'System',
+    email: log.user?.email || '',
+    action: log.action,
+    resource: log.resource,
+    resourceId: log.resourceId,
+    ipAddress: log.ipAddress,
+    userAgent: log.userAgent,
+    metadata: log.metadata ? JSON.stringify(log.metadata) : '',
+  }));
+};
 export default {
   log,
   getAuditEvents,
   getAuditEventById,
   getAuditStats,
+  exportAuditLogs,
 };

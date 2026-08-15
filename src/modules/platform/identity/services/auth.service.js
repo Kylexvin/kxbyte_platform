@@ -171,12 +171,42 @@ const logout = async (refreshToken) => {
   return { message: 'Logged out successfully' };
 };
 
+const revokeSession = async (userId, sessionId) => {
+  // Find the session
+  const sessions = await authDb.findSessionsByUserId(userId);
+  const session = sessions.find(s => s.id === sessionId);
+  if (!session) {
+    throw new Error('Session not found');
+  }
+
+  // Don't allow revoking the current session (they'd logout themselves)
+  // We'll check this in the controller
+
+  await authDb.deleteSession(sessionId);
+  return { message: 'Session revoked successfully' };
+};
+
 const getMe = async (userId) => {
   const user = await authDb.findUserById(userId);
   if (!user) {
     throw new Error('User not found');
   }
   const { password: _, ...userWithoutPassword } = user;
+  return userWithoutPassword;
+};
+
+const updateProfile = async (userId, data) => {
+  const user = await authDb.findUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  const updateData = {};
+  if (data.firstName !== undefined) updateData.firstName = data.firstName;
+  if (data.lastName !== undefined) updateData.lastName = data.lastName;
+
+  const updated = await authDb.updateUser(userId, updateData);
+  const { password: _, ...userWithoutPassword } = updated;
   return userWithoutPassword;
 };
 
@@ -349,6 +379,8 @@ export default {
   refreshToken,
   logout,
   getMe,
+  updateProfile,
+  revokeSession,
   forgotPassword,
   resetPassword,
   verifyEmail,

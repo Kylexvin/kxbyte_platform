@@ -70,6 +70,28 @@ const archiveOrganization = async (id) => {
   });
 };
 
+const restoreOrganization = async (id) => {
+  return prisma.organization.update({
+    where: { id },
+    data: { isArchived: false, isActive: true },
+  });
+};
+
+const findArchivedOrganizationsByUserId = async (userId) => {
+  return prisma.organization.findMany({
+    where: {
+      memberships: {
+        some: {
+          userId,
+          isActive: true,
+        },
+      },
+      isArchived: true,
+    },
+    orderBy: { updatedAt: 'desc' },
+  });
+};
+
 const createMembership = async (data) => {
   return prisma.membership.create({ data });
 };
@@ -138,6 +160,7 @@ const findUserByEmail = async (email) => {
   });
 };
 
+
 const updateMembership = async (id, data) => {
   return prisma.membership.update({
     where: { id },
@@ -152,6 +175,7 @@ export default {
   findOrganizationsByUserId,
   updateOrganization,
   archiveOrganization,
+  restoreOrganization,
   createMembership,
   findMembership,
   findMembershipsByOrganization,
@@ -160,4 +184,5 @@ export default {
   findUserById,
   findUserByEmail,
   updateMembership,
+  findArchivedOrganizationsByUserId,
 };
