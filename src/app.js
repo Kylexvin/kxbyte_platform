@@ -18,7 +18,8 @@ import audit from './modules/platform/audit/index.js';
 import notifications from './modules/platform/notifications/index.js';
 import payment from './modules/platform/payment/index.js';
 import branches from './modules/platform/branches/index.js';
-import cleanupRoutes from './modules/platform/admin/routes/cleanup.routes.js';
+import support from './modules/platform/support/index.js';
+
 
 
 
@@ -56,7 +57,7 @@ audit.register(app);
 notifications.register(app);
 payment.register(app);
 branches.register(app);
-app.use('/api/v1/admin/cleanup', cleanupRoutes);
+support.register(app);
 
 // ============================================================
 // KXTILL ROUTE REGISTRATION

@@ -29,6 +29,8 @@ model User {
   auditEvents       AuditEvent[]
   notifications Notification[]
   kxtillSales       KxTillSale[]
+  supportTickets SupportTicket[]
+  supportMessages SupportMessage[]
 
   @@map("users")
 }
@@ -97,6 +99,7 @@ model Organization {
   kxtillSales       KxTillSale[]
   kxtillStoreSetting KxTillStoreSetting?
   branches       Branch[]
+  supportTickets SupportTicket[]
 
   @@index([ownerId])
   @@index([slug])
@@ -783,4 +786,70 @@ model BranchAssignment {
   @@index([membershipId])
   @@index([branchId])
   @@map("branch_assignments")
+}
+
+// ============================================================
+// SUPPORT - TICKETS & CATEGORIES
+// ============================================================
+
+model SupportCategory {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  slug        String   @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tickets     SupportTicket[]
+
+  @@map("support_categories")
+}
+
+model SupportTicket {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  categoryId     String
+  category       SupportCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  title          String
+  description    String
+  priority       String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  status         String   @default("OPEN")   // OPEN, IN_PROGRESS, RESOLVED, CLOSED
+  productKey     String?  // kxtill, kxinvoice, etc.
+
+  messages       SupportMessage[]
+
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@index([categoryId])
+  @@index([productKey])
+  @@map("support_tickets")
+}
+
+model SupportMessage {
+  id             String   @id @default(uuid())
+  ticketId       String
+  ticket         SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message        String
+  isInternal     Boolean  @default(false)
+  attachments    Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([ticketId])
+  @@map("support_messages")
 }
