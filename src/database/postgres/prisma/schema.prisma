@@ -31,6 +31,7 @@ model User {
   kxtillSales       KxTillSale[]
   supportTickets SupportTicket[]
   supportMessages SupportMessage[]
+  socialAccounts SocialAccount[]
 
   @@map("users")
 }
@@ -852,4 +853,25 @@ model SupportMessage {
 
   @@index([ticketId])
   @@map("support_messages")
+}
+// ============================================================
+// SOCIAL AUTH
+// ============================================================
+
+model SocialAccount {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String   // google, github, apple, facebook
+  providerId  String
+  email       String?
+  name        String?
+  avatar      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([provider, providerId])
+  @@index([userId])
+  @@index([provider])
+  @@map("social_accounts")
 }

@@ -187,8 +187,17 @@ const refundSale = async (organizationId, userId, saleId) => {
     throw new Error('Sale already refunded');
   }
 
+  // Restore stock for each item
   for (const item of sale.items) {
-    await productDb.updateStock(item.productId, item.baseQuantity);
+    // Update branch product stock
+    await prisma.kxTillBranchProduct.update({
+      where: { id: item.branchProductId },
+      data: {
+        stock: {
+          increment: item.baseQuantity,
+        },
+      },
+    });
   }
 
   const updated = await saleDb.updateSaleStatus(saleId, 'REFUNDED');

@@ -2,106 +2,179 @@
 
 import prisma from '../../../../database/postgres/prisma.js';
 import orgDb from '../../../platform/organizations/db/org.db.js';
+import authorizationService from '../../../platform/authorization/services/authorization.service.js';
+
+const checkPermission = async (userId, organizationId, permissionKey) => {
+  return authorizationService.checkPermission(userId, organizationId, permissionKey);
+};
 
 // ============================================================
 // DASHBOARD SUMMARY
 // ============================================================
 
-const getDashboardSummary = async (organizationId, userId) => {
+const getDashboardSummary = async (organizationId, userId, period = '30d', branchId = null) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
   }
 
   const now = new Date();
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
+  let startDate = new Date(now);
 
-  const weekStart = new Date(now);
-  weekStart.setDate(weekStart.getDate() - 7);
+  if (period === 'today') {
+    startDate.setHours(0, 0, 0, 0);
+  } else if (period === '7d') {
+    startDate.setDate(startDate.getDate() - 7);
+  } else if (period === '30d') {
+    startDate.setDate(startDate.getDate() - 30);
+  } else if (period === '90d') {
+    startDate.setDate(startDate.getDate() - 90);
+  } else {
+    startDate.setDate(startDate.getDate() - 30);
+  }
 
-  const monthStart = new Date(now);
-  monthStart.setDate(monthStart.getDate() - 30);
+  const where = {
+    organizationId,
+    status: 'COMPLETED',
+    createdAt: { gte: startDate },
+  };
 
-  // Today's sales
-  const todaySales = await prisma.kxTillSale.aggregate({
-    where: {
-      organizationId,
-      status: 'COMPLETED',
-      createdAt: { gte: todayStart },
-    },
-    _sum: { totalAmount: true },
+  if (branchId) {
+    where.branchId = branchId;
+  }
+
+  // Total sales in period
+  const totalSales = await prisma.kxTillSale.aggregate({
+    where,
     _count: true,
-  });
-
-  // This week's sales
-  const weekSales = await prisma.kxTillSale.aggregate({
-    where: {
-      organizationId,
-      status: 'COMPLETED',
-      createdAt: { gte: weekStart },
-    },
     _sum: { totalAmount: true },
   });
 
-  // This month's sales
-  const monthSales = await prisma.kxTillSale.aggregate({
-    where: {
-      organizationId,
-      status: 'COMPLETED',
-      createdAt: { gte: monthStart },
+  // Previous period for growth
+  const diffDays = Math.ceil((now - startDate) / (1000 * 60 * 60 * 24));
+  const prevStartDate = new Date(startDate);
+  const prevEndDate = new Date(now);
+  prevStartDate.setDate(prevStartDate.getDate() - diffDays);
+  prevEndDate.setDate(prevEndDate.getDate() - diffDays);
+
+  const prevWhere = {
+    organizationId,
+    status: 'COMPLETED',
+    createdAt: {
+      gte: prevStartDate,
+      lte: prevEndDate,
     },
+  };
+
+  if (branchId) {
+    prevWhere.branchId = branchId;
+  }
+
+  const prevSales = await prisma.kxTillSale.aggregate({
+    where: prevWhere,
     _sum: { totalAmount: true },
   });
 
-  // Total revenue (all time)
-  const totalRevenue = await prisma.kxTillSale.aggregate({
-    where: {
-      organizationId,
-      status: 'COMPLETED',
-    },
-    _sum: { totalAmount: true },
+  // Active users — branch aware
+  let activeUsers = 0;
+  let totalBranchMembers = 0;
+
+  if (branchId) {
+    // Get users who made sales in this branch
+    const salesByUser = await prisma.kxTillSale.groupBy({
+      by: ['userId'],
+      where,
+    });
+
+    const userIds = salesByUser.map(s => s.userId);
+    if (userIds.length > 0) {
+      // Count users who have access to this branch
+      const membersWithAccess = await prisma.membership.count({
+        where: {
+          organizationId,
+          userId: { in: userIds },
+          isActive: true,
+          OR: [
+            { hasAllBranches: true },
+            {
+              branchAssignments: {
+                some: { branchId },
+              },
+            },
+          ],
+        },
+      });
+      activeUsers = membersWithAccess;
+    }
+
+    // Total members with access to this branch
+    totalBranchMembers = await prisma.membership.count({
+      where: {
+        organizationId,
+        isActive: true,
+        OR: [
+          { hasAllBranches: true },
+          {
+            branchAssignments: {
+              some: { branchId },
+            },
+          },
+        ],
+      },
+    });
+  } else {
+    // All branches — count unique users who made sales
+    const result = await prisma.kxTillSale.groupBy({
+      by: ['userId'],
+      where,
+    });
+    activeUsers = result.length;
+
+    // Total members
+    totalBranchMembers = await prisma.membership.count({
+      where: { organizationId, isActive: true },
+    });
+  }
+
+  // Inventory items
+  const inventoryWhere = {
+    product: { organizationId, isActive: true, trackInventory: true },
+    isAvailable: true,
+  };
+
+  if (branchId) {
+    inventoryWhere.branchId = branchId;
+  }
+
+  const inventoryItems = await prisma.kxTillBranchProduct.aggregate({
+    where: inventoryWhere,
+    _sum: { stock: true },
   });
 
-  // Today's sale count
-  const todayCount = await prisma.kxTillSale.count({
+  // Low stock
+  const lowStock = await prisma.kxTillBranchProduct.count({
     where: {
-      organizationId,
-      status: 'COMPLETED',
-      createdAt: { gte: todayStart },
-    },
-  });
-
-  // Yesterday's sales for growth comparison
-  const yesterdayStart = new Date(now);
-  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-  yesterdayStart.setHours(0, 0, 0, 0);
-
-  const yesterdaySales = await prisma.kxTillSale.aggregate({
-    where: {
-      organizationId,
-      status: 'COMPLETED',
-      createdAt: {
-        gte: yesterdayStart,
-        lt: todayStart,
+      ...inventoryWhere,
+      stock: {
+        lte: prisma.kxTillBranchProduct.fields.minStock,
       },
     },
-    _sum: { totalAmount: true },
   });
 
-  const todayTotal = todaySales._sum?.totalAmount || 0;
-  const yesterdayTotal = yesterdaySales._sum?.totalAmount || 0;
-  const growth = yesterdayTotal > 0 ? ((todayTotal - yesterdayTotal) / yesterdayTotal) * 100 : 0;
+  const currentTotal = Number(totalSales._sum?.totalAmount || 0);
+  const prevTotal = Number(prevSales._sum?.totalAmount || 0);
+  const growth = prevTotal > 0 ? ((currentTotal - prevTotal) / prevTotal) * 100 : 0;
+  const totalSalesCount = totalSales._count || 0;
 
   return {
-    today: {
-      sales: todayTotal,
-      count: todaySales._count || 0,
-      growth: Math.round(growth * 100) / 100,
-    },
-    thisWeek: weekSales._sum?.totalAmount || 0,
-    thisMonth: monthSales._sum?.totalAmount || 0,
-    totalRevenue: totalRevenue._sum?.totalAmount || 0,
+    totalSales: totalSalesCount,
+    totalRevenue: currentTotal,
+    activeUsers: activeUsers || 0,
+    conversionRate: totalBranchMembers > 0 ? Math.round((activeUsers / totalBranchMembers) * 100) : 0,
+    averageOrderValue: totalSalesCount > 0 ? Math.round(currentTotal / totalSalesCount) : 0,
+    growth: Math.round(growth * 10) / 10,
+    inventoryItems: Number(inventoryItems._sum?.stock || 0),
+    lowStock: lowStock || 0,
   };
 };
 
@@ -109,76 +182,101 @@ const getDashboardSummary = async (organizationId, userId) => {
 // SALES CHART
 // ============================================================
 
-const getSalesChart = async (organizationId, userId, period = '7d') => {
+const getSalesChart = async (organizationId, userId, period = '30d', branchId = null, interval = 'day') => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
   }
 
-  const now = new Date();
-  let days = 7;
-  let labels = [];
+  // Enforce branch access
+  if (!membership.hasAllBranches) {
+    const assignments = await prisma.branchAssignment.findMany({
+      where: { membershipId: membership.id },
+      select: { branchId: true },
+    });
+    const assignedBranchIds = assignments.map(a => a.branchId);
 
+    if (branchId) {
+      if (!assignedBranchIds.includes(branchId)) {
+        throw new Error('You do not have access to this branch');
+      }
+    } else {
+      if (assignedBranchIds.length === 0) {
+        throw new Error('You do not have access to any branch');
+      }
+      branchId = assignedBranchIds[0];
+    }
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.view');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to view sales');
+  }
+
+  const now = new Date();
+  let days = 30;
   if (period === '7d') days = 7;
   else if (period === '30d') days = 30;
   else if (period === '90d') days = 90;
-
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date(now);
-    date.setDate(date.getDate() - i);
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    labels.push(`${day}/${month}`);
-  }
 
   const startDate = new Date(now);
   startDate.setDate(startDate.getDate() - days);
   startDate.setHours(0, 0, 0, 0);
 
-  // Get all sales in the period using Prisma
+  const where = {
+    organizationId,
+    status: 'COMPLETED',
+    createdAt: { gte: startDate },
+  };
+  if (branchId) where.branchId = branchId;
+
+  // Get sales
   const sales = await prisma.kxTillSale.findMany({
-    where: {
-      organizationId,
-      status: 'COMPLETED',
-      createdAt: {
-        gte: startDate,
-      },
-    },
+    where,
     select: {
       createdAt: true,
       totalAmount: true,
     },
-    orderBy: {
-      createdAt: 'asc',
-    },
+    orderBy: { createdAt: 'asc' },
   });
 
   // Group by day
   const salesByDay = {};
+  let total = 0;
   for (const sale of sales) {
     const dateStr = sale.createdAt.toISOString().split('T')[0];
     if (!salesByDay[dateStr]) {
       salesByDay[dateStr] = 0;
     }
     salesByDay[dateStr] += Number(sale.totalAmount);
+    total += Number(sale.totalAmount);
   }
 
-  // Map to labels
-  const data = labels.map((_, index) => {
+  // Build data array
+  const data = [];
+  for (let i = days - 1; i >= 0; i--) {
     const date = new Date(now);
-    date.setDate(date.getDate() - (days - 1 - index));
+    date.setDate(date.getDate() - i);
     const dateStr = date.toISOString().split('T')[0];
-    return salesByDay[dateStr] || 0;
-  });
+    const label = date.toLocaleDateString('en-KE', { day: '2-digit', month: 'short' });
+    data.push({
+      date: dateStr,
+      label: label,
+      value: salesByDay[dateStr] || 0,
+    });
+  }
+
+  // Calculate trend (compare last 7 days to previous 7 days)
+  const last7Days = data.slice(-7);
+  const prev7Days = data.slice(-14, -7);
+  const lastTotal = last7Days.reduce((sum, d) => sum + d.value, 0);
+  const prevTotal = prev7Days.reduce((sum, d) => sum + d.value, 0);
+  const trend = prevTotal > 0 ? ((lastTotal - prevTotal) / prevTotal) * 100 : 0;
 
   return {
-    labels,
-    datasets: [
-      {
-        name: 'Sales',
-        data,
-      },
-    ],
+    data,
+    total,
+    trend: Math.round(trend * 10) / 10,
   };
 };
 
@@ -186,20 +284,33 @@ const getSalesChart = async (organizationId, userId, period = '7d') => {
 // TOP PRODUCTS
 // ============================================================
 
-const getTopProducts = async (organizationId, userId, limit = 10) => {
+const getTopProducts = async (organizationId, userId, limit = 10, branchId = null) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
   }
 
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.view');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to view sales');
+  }
+
+  // Build where clause for sale items
+  const saleWhere = {
+    sale: {
+      organizationId,
+      status: 'COMPLETED',
+    },
+  };
+
+  if (branchId) {
+    saleWhere.sale.branchId = branchId;
+  }
+
+  // Group by productId
   const topProducts = await prisma.kxTillSaleItem.groupBy({
     by: ['productId'],
-    where: {
-      sale: {
-        organizationId,
-        status: 'COMPLETED',
-      },
-    },
+    where: saleWhere,
     _sum: {
       total: true,
       quantity: true,
@@ -212,7 +323,7 @@ const getTopProducts = async (organizationId, userId, limit = 10) => {
     take: limit,
   });
 
-  // Get product details
+  // Get product details (no stock field)
   const products = await Promise.all(
     topProducts.map(async (item) => {
       const product = await prisma.kxTillProduct.findUnique({
@@ -221,16 +332,42 @@ const getTopProducts = async (organizationId, userId, limit = 10) => {
           id: true,
           name: true,
           sku: true,
-          stock: true,
+          // ✅ stock removed — it's now in KxTillBranchProduct
         },
       });
+
+      // Get stock for this branch (or all branches)
+      let stock = 0;
+      if (branchId) {
+        const branchProduct = await prisma.kxTillBranchProduct.findUnique({
+          where: {
+            productId_branchId: {
+              productId: item.productId,
+              branchId,
+            },
+          },
+          select: { stock: true },
+        });
+        stock = branchProduct?.stock || 0;
+      } else {
+        // Get total stock across all branches
+        const totalStock = await prisma.kxTillBranchProduct.aggregate({
+          where: {
+            productId: item.productId,
+            product: { organizationId },
+          },
+          _sum: { stock: true },
+        });
+        stock = totalStock._sum?.stock || 0;
+      }
+
       return {
         productId: product?.id || '',
         name: product?.name || 'Unknown',
         sku: product?.sku || '',
         total: item._sum.total || 0,
         quantity: item._sum.quantity || 0,
-        stock: product?.stock || 0,
+        stock: stock,
       };
     })
   );
@@ -242,55 +379,121 @@ const getTopProducts = async (organizationId, userId, limit = 10) => {
 // LOW STOCK
 // ============================================================
 
-const getLowStock = async (organizationId, userId) => {
+const getLowStock = async (organizationId, userId, branchId = null) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
   }
 
-  // Use Prisma findMany with where condition
-  const products = await prisma.kxTillProduct.findMany({
-    where: {
+  // Enforce branch access
+  if (!membership.hasAllBranches) {
+    const assignments = await prisma.branchAssignment.findMany({
+      where: { membershipId: membership.id },
+      select: { branchId: true },
+    });
+    const assignedBranchIds = assignments.map(a => a.branchId);
+
+    if (branchId) {
+      if (!assignedBranchIds.includes(branchId)) {
+        throw new Error('You do not have access to this branch');
+      }
+    } else {
+      if (assignedBranchIds.length === 0) {
+        throw new Error('You do not have access to any branch');
+      }
+      branchId = assignedBranchIds[0];
+    }
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.inventory.view');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to view inventory');
+  }
+
+  const where = {
+    product: {
       organizationId,
       isActive: true,
       trackInventory: true,
-      stock: {
-        lte: prisma.kxTillProduct.fields.minStock,
-      },
     },
+    isAvailable: true,
+    stock: {
+      lte: prisma.kxTillBranchProduct.fields.minStock,
+    },
+  };
+
+  if (branchId) {
+    where.branchId = branchId;
+  }
+
+  const branchProducts = await prisma.kxTillBranchProduct.findMany({
+    where,
     include: {
-      baseUnit: true,
+      product: {
+        include: {
+          baseUnit: true,
+        },
+      },
+      branch: true,
     },
-    orderBy: {
-      stock: 'asc',
-    },
+    orderBy: { stock: 'asc' },
   });
 
-  return products.map((p) => ({
-    id: p.id,
-    name: p.name,
-    sku: p.sku,
-    stock: p.stock,
-    minStock: p.minStock,
-    unit: p.baseUnit?.abbreviation || 'units',
+  return branchProducts.map((bp) => ({
+    id: bp.id,
+    productId: bp.productId,
+    name: bp.product.name,
+    sku: bp.product.sku,
+    stock: bp.stock,
+    minStock: bp.minStock,
+    unit: bp.product.baseUnit?.abbreviation || 'units',
+    branchId: bp.branchId,
+    branchName: bp.branch.name,
   }));
 };
+
 
 // ============================================================
 // RECENT SALES
 // ============================================================
 
-const getRecentSales = async (organizationId, userId, limit = 10) => {
+const getRecentSales = async (organizationId, userId, limit = 10, branchId = null) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
   }
 
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.view');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to view sales');
+  }
+
+  // Build where clause
+  const where = {
+    organizationId,
+    status: 'COMPLETED',
+  };
+
+  // If branchId is provided, filter by it
+  if (branchId) {
+    where.branchId = branchId;
+  } else if (!membership.hasAllBranches) {
+    // If user doesn't have all branches, get their assigned branches
+    const assignments = await prisma.branchAssignment.findMany({
+      where: { membershipId: membership.id },
+      select: { branchId: true },
+    });
+    const assignedBranchIds = assignments.map(a => a.branchId);
+
+    if (assignedBranchIds.length === 0) {
+      throw new Error('You do not have access to any branch');
+    }
+
+    where.branchId = { in: assignedBranchIds };
+  }
+
   const sales = await prisma.kxTillSale.findMany({
-    where: {
-      organizationId,
-      status: 'COMPLETED',
-    },
+    where,
     include: {
       items: {
         include: {
@@ -305,6 +508,11 @@ const getRecentSales = async (organizationId, userId, limit = 10) => {
         select: {
           firstName: true,
           lastName: true,
+        },
+      },
+      branch: {
+        select: {
+          name: true,
         },
       },
     },
@@ -323,8 +531,574 @@ const getRecentSales = async (organizationId, userId, limit = 10) => {
       total: i.total,
     })),
     user: s.user?.firstName || 'Unknown',
+    branchName: s.branch?.name || 'Unknown',
     createdAt: s.createdAt,
   }));
+};
+
+const getTodaySales = async (organizationId, userId, branchId = null) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.view');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to view sales');
+  }
+
+  // Enforce branch access
+  if (!membership.hasAllBranches) {
+    const assignments = await prisma.branchAssignment.findMany({
+      where: { membershipId: membership.id },
+      select: { branchId: true },
+    });
+    const assignedBranchIds = assignments.map(a => a.branchId);
+
+    if (branchId) {
+      if (!assignedBranchIds.includes(branchId)) {
+        throw new Error('You do not have access to this branch');
+      }
+    } else {
+      if (assignedBranchIds.length === 0) {
+        throw new Error('You do not have access to any branch');
+      }
+      branchId = assignedBranchIds[0];
+    }
+  }
+
+  const now = new Date();
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  const where = {
+    organizationId,
+    status: 'COMPLETED',
+    createdAt: { gte: todayStart },
+  };
+
+  if (branchId) {
+    where.branchId = branchId;
+  }
+
+  // Get today's sales
+  const sales = await prisma.kxTillSale.findMany({
+    where,
+    include: {
+      items: {
+        include: {
+          product: {
+            select: { name: true },
+          },
+        },
+      },
+      user: {
+        select: {
+          firstName: true,
+          lastName: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  // Calculate totals
+  const totalSales = sales.length;
+  const totalRevenue = sales.reduce((sum, s) => sum + Number(s.totalAmount), 0);
+  const averageOrder = totalSales > 0 ? Math.round(totalRevenue / totalSales) : 0;
+
+  // Find top seller
+  const productCounts = {};
+  for (const sale of sales) {
+    for (const item of sale.items) {
+      const name = item.product?.name || 'Unknown';
+      if (!productCounts[name]) {
+        productCounts[name] = 0;
+      }
+      productCounts[name] += Number(item.quantity);
+    }
+  }
+  let topSeller = '—';
+  let maxCount = 0;
+  for (const [name, count] of Object.entries(productCounts)) {
+    if (count > maxCount) {
+      maxCount = count;
+      topSeller = name;
+    }
+  }
+
+  // Recent transactions (last 10)
+  const recentTransactions = sales.slice(0, 10).map((s) => ({
+    id: s.id,
+    invoice: s.id.slice(0, 8).toUpperCase(),
+    customer: 'Walk-in', // Will be updated when customer module is added
+    amount: Number(s.totalAmount),
+    items: s.items.reduce((sum, i) => sum + Number(i.quantity), 0),
+    time: new Date(s.createdAt).toLocaleTimeString('en-KE', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    user: s.user ? `${s.user.firstName} ${s.user.lastName}`.trim() : 'Unknown',
+  }));
+
+  return {
+    today: {
+      date: now.toISOString().split('T')[0],
+      totalSales,
+      totalRevenue,
+      averageOrder,
+      topSeller,
+    },
+    recentTransactions,
+  };
+};
+
+// BRANCH OVERVIEW
+const getBranchOverview = async (organizationId, userId, period = 'today') => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'branches.view');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to view branches');
+  }
+
+  const now = new Date();
+  let startDate = new Date(now);
+
+  if (period === 'today') {
+    startDate.setHours(0, 0, 0, 0);
+  } else if (period === '7d') {
+    startDate.setDate(startDate.getDate() - 7);
+  } else if (period === '30d') {
+    startDate.setDate(startDate.getDate() - 30);
+  } else {
+    startDate.setHours(0, 0, 0, 0);
+  }
+
+  // Get branches based on user's access
+  let branchWhere = {
+    organizationId,
+    isActive: true,
+  };
+
+  // If user doesn't have all branches, filter by assignments
+  if (!membership.hasAllBranches) {
+    const assignments = await prisma.branchAssignment.findMany({
+      where: { membershipId: membership.id },
+      select: { branchId: true },
+    });
+    const assignedBranchIds = assignments.map(a => a.branchId);
+
+    if (assignedBranchIds.length === 0) {
+      throw new Error('You do not have access to any branch');
+    }
+
+    branchWhere.id = { in: assignedBranchIds };
+  }
+
+  const branches = await prisma.branch.findMany({
+    where: branchWhere,
+  });
+
+  const branchData = await Promise.all(
+    branches.map(async (branch) => {
+      const sales = await prisma.kxTillSale.aggregate({
+        where: {
+          organizationId,
+          branchId: branch.id,
+          status: 'COMPLETED',
+          createdAt: { gte: startDate },
+        },
+        _count: true,
+        _sum: { totalAmount: true },
+      });
+
+      const activeUsers = await prisma.kxTillSale.groupBy({
+        by: ['userId'],
+        where: {
+          organizationId,
+          branchId: branch.id,
+          status: 'COMPLETED',
+          createdAt: { gte: startDate },
+        },
+      });
+
+      const lowStockItems = await prisma.kxTillBranchProduct.count({
+        where: {
+          branchId: branch.id,
+          isAvailable: true,
+          product: {
+            organizationId,
+            isActive: true,
+            trackInventory: true,
+          },
+          stock: {
+            lte: prisma.kxTillBranchProduct.fields.minStock,
+          },
+        },
+      });
+
+      return {
+        id: branch.id,
+        name: branch.name,
+        totalSales: sales._count || 0,
+        totalRevenue: Number(sales._sum?.totalAmount || 0),
+        activeUsers: activeUsers.length || 0,
+        lowStockItems: lowStockItems || 0,
+      };
+    })
+  );
+
+  const total = {
+    sales: branchData.reduce((sum, b) => sum + b.totalSales, 0),
+    revenue: branchData.reduce((sum, b) => sum + b.totalRevenue, 0),
+    users: branchData.reduce((sum, b) => sum + b.activeUsers, 0),
+  };
+
+  return {
+    branches: branchData,
+    total,
+  };
+};
+
+const getInventoryAlerts = async (organizationId, userId, branchId = null, type = 'low-stock') => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.inventory.view');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to view inventory');
+  }
+
+  // Build where clause for branch products
+  const where = {
+    product: {
+      organizationId,
+      isActive: true,
+      trackInventory: true,
+    },
+    isAvailable: true,
+  };
+
+  if (branchId) {
+    where.branchId = branchId;
+  }
+
+  // Apply type filter
+  if (type === 'out-of-stock') {
+    where.stock = 0;
+  } else if (type === 'low-stock') {
+    where.stock = {
+      gt: 0,
+      lte: prisma.kxTillBranchProduct.fields.minStock,
+    };
+  } else {
+    // default: all alerts (low-stock + out-of-stock)
+    where.OR = [
+      { stock: 0 },
+      {
+        stock: {
+          gt: 0,
+          lte: prisma.kxTillBranchProduct.fields.minStock,
+        },
+      },
+    ];
+  }
+
+  const alerts = await prisma.kxTillBranchProduct.findMany({
+    where,
+    include: {
+      product: {
+        select: {
+          name: true,
+          sku: true,
+        },
+      },
+      branch: {
+        select: {
+          name: true,
+        },
+      },
+    },
+    orderBy: { stock: 'asc' },
+    take: 50,
+  });
+
+  const formattedAlerts = alerts.map((item) => {
+    let status = 'low-stock';
+    if (Number(item.stock) === 0) {
+      status = 'out-of-stock';
+    } else if (Number(item.stock) <= Number(item.minStock)) {
+      status = 'low-stock';
+    }
+
+    return {
+      id: item.id,
+      productName: item.product.name,
+      sku: item.product.sku,
+      currentStock: Number(item.stock),
+      minStock: Number(item.minStock),
+      status,
+      branch: item.branch.name,
+      branchId: item.branchId,
+    };
+  });
+
+  return {
+    alerts: formattedAlerts,
+    total: formattedAlerts.length,
+  };
+};
+// ============================================================
+// BRANCH BREAKDOWN
+// ============================================================
+
+const getBranchBreakdown = async (organizationId, userId, filters = {}) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  // Check if user is owner
+  const organization = await orgDb.findOrganizationById(organizationId);
+  const isOwner = organization?.ownerId === userId;
+
+  if (!isOwner) {
+    throw new Error('Only the organization owner can view branch breakdown');
+  }
+
+  const { period = '30d' } = filters;
+
+  const now = new Date();
+  const startDate = new Date(now);
+  startDate.setDate(startDate.getDate() - (period === '7d' ? 7 : period === '90d' ? 90 : 30));
+  startDate.setHours(0, 0, 0, 0);
+
+  // Get all branches for this organization
+  const branches = await prisma.branch.findMany({
+    where: {
+      organizationId,
+      isActive: true,
+    },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+    },
+  });
+
+  // Get sales per branch
+  const branchSales = await Promise.all(
+    branches.map(async (branch) => {
+      const sales = await prisma.kxTillSale.aggregate({
+        where: {
+          organizationId,
+          branchId: branch.id,
+          status: 'COMPLETED',
+          createdAt: { gte: startDate },
+        },
+        _sum: { totalAmount: true },
+        _count: true,
+      });
+
+      return {
+        id: branch.id,
+        name: branch.name,
+        code: branch.code,
+        sales: sales._sum?.totalAmount || 0,
+        transactions: sales._count || 0,
+      };
+    })
+  );
+
+  // Calculate totals and percentages
+  const totalSales = branchSales.reduce((sum, b) => sum + Number(b.sales), 0);
+  const totalTransactions = branchSales.reduce((sum, b) => sum + b.transactions, 0);
+
+  const data = branchSales.map((b) => ({
+    name: b.name,
+    code: b.code,
+    sales: Number(b.sales),
+    transactions: b.transactions,
+    percentage: totalSales > 0 ? Math.round((Number(b.sales) / totalSales) * 100) : 0,
+  }));
+
+  return {
+    data: data.sort((a, b) => b.sales - a.sales),
+    totalSales,
+    totalTransactions,
+    branchCount: branches.length,
+  };
+};
+
+const getPaymentMethodDistribution = async (organizationId, userId, filters = {}) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const { branchId, period = '30d' } = filters;
+
+  const now = new Date();
+  const startDate = new Date(now);
+  startDate.setDate(startDate.getDate() - (period === '7d' ? 7 : period === '90d' ? 90 : 30));
+  startDate.setHours(0, 0, 0, 0);
+
+  const where = {
+    organizationId,
+    status: 'COMPLETED',
+    createdAt: { gte: startDate },
+  };
+
+  if (branchId) {
+    where.branchId = branchId;
+  }
+
+  const payments = await prisma.kxTillSalePayment.findMany({
+    where: {
+      sale: where,
+    },
+    select: {
+      method: true,
+      amount: true,
+    },
+  });
+
+  // Aggregate by method
+  const methodMap = {};
+  for (const payment of payments) {
+    const method = payment.method || 'OTHER';
+    if (!methodMap[method]) {
+      methodMap[method] = 0;
+    }
+    methodMap[method] += Number(payment.amount);
+  }
+
+  const total = Object.values(methodMap).reduce((sum, val) => sum + val, 0);
+
+  const methods = Object.keys(methodMap).map((key) => ({
+    name: key.charAt(0) + key.slice(1).toLowerCase(),
+    value: total > 0 ? Math.round((methodMap[key] / total) * 100) : 0,
+    amount: methodMap[key],
+  }));
+
+  return {
+    paymentMethods: methods.sort((a, b) => b.value - a.value),
+    total,
+  };
+};
+
+
+// ============================================================
+// RETURNS SUMMARY
+// ============================================================
+
+const getReturnsSummary = async (organizationId, userId, filters = {}) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const { branchId, period = '30d' } = filters;
+
+  const now = new Date();
+  const startDate = new Date(now);
+  startDate.setDate(startDate.getDate() - (period === '7d' ? 7 : period === '90d' ? 90 : 30));
+  startDate.setHours(0, 0, 0, 0);
+
+  const where = {
+    organizationId,
+    status: 'REFUNDED',
+    updatedAt: { gte: startDate },
+  };
+
+  if (branchId) {
+    where.branchId = branchId;
+  }
+
+  const refundedSales = await prisma.kxTillSale.findMany({
+    where,
+    include: {
+      items: {
+        include: {
+          product: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+      branch: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  });
+
+  const totalReturns = refundedSales.length;
+  let totalAmount = 0;
+  const productMap = {};
+  const branchMap = {};
+
+  for (const sale of refundedSales) {
+    totalAmount += Number(sale.totalAmount);
+
+    const branchName = sale.branch?.name || 'Unknown';
+    if (!branchMap[branchName]) {
+      branchMap[branchName] = { count: 0, total: 0 };
+    }
+    branchMap[branchName].count += 1;
+    branchMap[branchName].total += Number(sale.totalAmount);
+
+    for (const item of sale.items) {
+      const productName = item.product?.name || 'Unknown';
+      if (!productMap[productName]) {
+        productMap[productName] = { count: 0, total: 0 };
+      }
+      productMap[productName].count += Number(item.quantity);
+      productMap[productName].total += Number(item.total);
+    }
+  }
+
+  const totalSales = await prisma.kxTillSale.count({
+    where: {
+      organizationId,
+      status: 'COMPLETED',
+      createdAt: { gte: startDate },
+    },
+  });
+
+  const returnRate = totalSales > 0 ? (totalReturns / totalSales) * 100 : 0;
+
+  const topReturnedProducts = Object.keys(productMap)
+    .map((name) => ({
+      name,
+      count: productMap[name].count,
+      total: productMap[name].total,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  const byBranch = Object.keys(branchMap).map((name) => ({
+    branchName: name,
+    count: branchMap[name].count,
+    total: branchMap[name].total,
+  }));
+
+  return {
+    totalReturns,
+    thisMonth: totalReturns,
+    returnRate: Math.round(returnRate * 100) / 100,
+    totalAmount,
+    topReturnedProducts,
+    byBranch,
+  };
 };
 
 // ============================================================
@@ -337,4 +1111,10 @@ export default {
   getTopProducts,
   getLowStock,
   getRecentSales,
+  getBranchOverview,
+  getInventoryAlerts,
+  getTodaySales,
+  getPaymentMethodDistribution,
+  getBranchBreakdown,
+  getReturnsSummary,
 };

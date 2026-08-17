@@ -200,6 +200,11 @@ const getLowStockProducts = async (organizationId, userId) => {
     throw new Error('You do not have access to this organization');
   }
 
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.inventory.view');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to view inventory');
+  }
+
   return productDb.getLowStockProducts(organizationId);
 };
 
@@ -214,80 +219,21 @@ const getBranchProducts = async (organizationId, userId, branchId, filters = {})
   }
 
   // Check if user has access to this branch
-  const hasBranchAccess = await prisma.branchAssignment.findUnique({
-    where: {
-      membershipId_branchId: {
-        membershipId: membership.id,
-        branchId,
-      },
-    },
-  });
-
-  if (!membership.hasAllBranches && !hasBranchAccess) {
-    throw new Error('You do not have access to this branch');
-  }
-
-  const { limit = 50, offset = 0, search, category } = filters;
-  const where = {
-    branchId,
-    product: {
-      organizationId,
-      isActive: true,
-    },
-    isAvailable: true,
-  };
-
-  if (search) {
-    where.product.OR = [
-      { name: { contains: search, mode: 'insensitive' } },
-      { sku: { contains: search, mode: 'insensitive' } },
-    ];
-  }
-  if (category) {
-    where.product.category = category;
-  }
-
-  const [items, total] = await Promise.all([
-    prisma.kxTillBranchProduct.findMany({
-      where,
-      include: {
-        product: {
-          include: {
-            units: true,
-            baseUnit: true,
-          },
+  if (!membership.hasAllBranches) {
+    const hasBranchAccess = await prisma.branchAssignment.findUnique({
+      where: {
+        membershipId_branchId: {
+          membershipId: membership.id,
+          branchId,
         },
       },
-      orderBy: {
-        product: {
-          name: 'asc',
-        },
-      },
-      skip: offset,
-      take: limit,
-    }),
-    prisma.kxTillBranchProduct.count({ where }),
-  ]);
+    });
+    if (!hasBranchAccess) {
+      throw new Error('You do not have access to this branch');
+    }
+  }
 
-  return {
-    items: items.map((bp) => ({
-      id: bp.id,
-      productId: bp.productId,
-      name: bp.product.name,
-      displayName: bp.displayName,
-      sku: bp.product.sku,
-      category: bp.product.category,
-      price: bp.price,
-      stock: bp.stock,
-      minStock: bp.minStock,
-      isAvailable: bp.isAvailable,
-      units: bp.product.units,
-      baseUnit: bp.product.baseUnit,
-    })),
-    total,
-    limit,
-    offset,
-  };
+  return productDb.getBranchProducts(branchId, filters);
 };
 
 const updateBranchProductStock = async (organizationId, userId, branchId, productId, stockData) => {

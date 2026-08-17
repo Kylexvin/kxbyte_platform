@@ -12,8 +12,9 @@ const router = express.Router({ mergeParams: true });
 
 router.use(authMiddleware.authenticate);
 
-// Product routes
-router.get('/products/low-stock', productController.getLowStockProducts);
+// ============================================================
+// PRODUCT ROUTES (Organization-level)
+// ============================================================
 router.post('/products', productController.createProduct);
 router.get('/products', productController.getProducts);
 router.get('/products/:productId', productController.getProduct);
@@ -21,30 +22,55 @@ router.patch('/products/:productId', productController.updateProduct);
 router.delete('/products/:productId', productController.deleteProduct);
 
 // ============================================================
-// BRANCH PRODUCT ROUTES
+// BRANCH PRODUCT ROUTES (Branch-level inventory)
 // ============================================================
-
 router.get('/branches/:branchId/products', productController.getBranchProducts);
 router.patch('/branches/:branchId/products/:productId/stock', productController.updateBranchProductStock);
 
-// Sale routes
+// ============================================================
+// SALE ROUTES
+// ============================================================
 router.post('/sales', saleController.createSale);
 router.get('/sales', saleController.getSales);
 router.get('/sales/:saleId', saleController.getSale);
 router.post('/sales/:saleId/refund', saleController.refundSale);
+router.get('/sales/:saleId/receipt', receiptController.generateReceipt);
 
-// Report routes
+// ============================================================
+// DASHBOARD ROUTES
+// ============================================================
+// Summary
 router.get('/dashboard/summary', reportController.getDashboardSummary);
+
+// Sales chart
 router.get('/dashboard/sales-chart', reportController.getSalesChart);
+
+// Top products (branch-aware)
 router.get('/dashboard/top-products', reportController.getTopProducts);
-router.get('/dashboard/low-stock', reportController.getLowStock);
+
+// Recent sales
 router.get('/dashboard/recent-sales', reportController.getRecentSales);
 
-// Store settings routes
+// Todays's sales
+router.get('/dashboard/today-sales', reportController.getTodaySales);
+router.get('/dashboard/payment-methods', reportController.getPaymentMethodDistribution);
+router.get('/dashboard/branch-breakdown', reportController.getBranchBreakdown);
+router.get('/dashboard/returns-summary', reportController.getReturnsSummary);
+
+// Low stock (branch-aware)
+router.get('/dashboard/low-stock', reportController.getLowStock);
+
+
+// Branch overview
+router.get('/dashboard/branch-overview', reportController.getBranchOverview);
+
+// Inventory alerts (branch-aware)
+router.get('/dashboard/inventory-alerts', reportController.getInventoryAlerts);
+
+// ============================================================
+// SETTINGS
+// ============================================================
 router.get('/settings', settingController.getSettings);
 router.patch('/settings', settingController.updateSettings);
-
-// Receipt routes
-router.get('/sales/:saleId/receipt', receiptController.generateReceipt);
 
 export default router;

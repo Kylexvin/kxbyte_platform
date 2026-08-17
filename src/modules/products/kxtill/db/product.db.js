@@ -3,7 +3,7 @@
 import prisma from '../../../../database/postgres/prisma.js';
 
 // ============================================================
-// PRODUCT CRUD
+// PRODUCT CRUD (Organization-level)
 // ============================================================
 
 const createProduct = async (data) => {
@@ -16,6 +16,11 @@ const findProductById = async (id, organizationId) => {
     include: {
       units: true,
       baseUnit: true,
+      branchProducts: {
+        include: {
+          branch: true,
+        },
+      },
     },
   });
 };
@@ -39,6 +44,11 @@ const findProductsByOrganization = async (organizationId, filters = {}) => {
       include: {
         units: true,
         baseUnit: true,
+        branchProducts: {
+          include: {
+            branch: true,
+          },
+        },
       },
       orderBy: { name: 'asc' },
       skip: offset,
@@ -57,6 +67,11 @@ const updateProduct = async (id, organizationId, data) => {
     include: {
       units: true,
       baseUnit: true,
+      branchProducts: {
+        include: {
+          branch: true,
+        },
+      },
     },
   });
 };
@@ -104,34 +119,138 @@ const deleteProductUnit = async (id) => {
 };
 
 // ============================================================
-// STOCK
+// BRANCH PRODUCTS (Branch-level inventory)
 // ============================================================
 
-const updateStock = async (productId, quantity) => {
-  return prisma.kxTillProduct.update({
-    where: { id: productId },
-    data: {
-      stock: {
-        increment: quantity,
+const findBranchProduct = async (productId, branchId) => {
+  return prisma.kxTillBranchProduct.findUnique({
+    where: {
+      productId_branchId: {
+        productId,
+        branchId,
       },
+    },
+    include: {
+      product: {
+        include: {
+          units: true,
+          baseUnit: true,
+        },
+      },
+      branch: true,
     },
   });
 };
 
 const getLowStockProducts = async (organizationId) => {
-  return prisma.kxTillProduct.findMany({
+  // Get all branch products with low stock
+  const branchProducts = await prisma.kxTillBranchProduct.findMany({
     where: {
-      organizationId,
-      isActive: true,
-      trackInventory: true,
+      product: {
+        organizationId,
+        isActive: true,
+        trackInventory: true,
+      },
+      isAvailable: true,
       stock: {
-        lte: prisma.kxTillProduct.fields.minStock,
+        lte: prisma.kxTillBranchProduct.fields.minStock,
       },
     },
     include: {
-      baseUnit: true,
+      product: {
+        include: {
+          baseUnit: true,
+        },
+      },
+      branch: true,
     },
     orderBy: { stock: 'asc' },
+  });
+
+  return branchProducts.map((bp) => ({
+    id: bp.id,
+    productId: bp.productId,
+    name: bp.product.name,
+    sku: bp.product.sku,
+    stock: bp.stock,
+    minStock: bp.minStock,
+    unit: bp.product.baseUnit?.abbreviation || 'units',
+    branchId: bp.branchId,
+    branchName: bp.branch.name,
+  }));
+};
+
+const getBranchProducts = async (branchId, filters = {}) => {
+  const { limit = 50, offset = 0, search, category } = filters;
+  const where = {
+    branchId,
+    isAvailable: true,
+    product: {
+      isActive: true,
+    },
+  };
+
+  if (search) {
+    where.product.OR = [
+      { name: { contains: search, mode: 'insensitive' } },
+      { displayName: { contains: search, mode: 'insensitive' } },
+      { sku: { contains: search, mode: 'insensitive' } },
+    ];
+  }
+  if (category) {
+    where.product.category = category;
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.kxTillBranchProduct.findMany({
+      where,
+      include: {
+        product: {
+          include: {
+            units: true,
+            baseUnit: true,
+          },
+        },
+        branch: true,
+      },
+      orderBy: {
+        product: {
+          name: 'asc',
+        },
+      },
+      skip: offset,
+      take: limit,
+    }),
+    prisma.kxTillBranchProduct.count({ where }),
+  ]);
+
+  return {
+    items: items.map((bp) => ({
+      id: bp.id,
+      productId: bp.productId,
+      name: bp.product.name,
+      displayName: bp.displayName,
+      sku: bp.product.sku,
+      category: bp.product.category,
+      price: bp.price,
+      stock: bp.stock,
+      minStock: bp.minStock,
+      isAvailable: bp.isAvailable,
+      units: bp.product.units,
+      baseUnit: bp.product.baseUnit,
+      branchId: bp.branchId,
+      branchName: bp.branch.name,
+    })),
+    total,
+    limit,
+    offset,
+  };
+};
+
+const updateBranchProductStock = async (branchProductId, data) => {
+  return prisma.kxTillBranchProduct.update({
+    where: { id: branchProductId },
+    data,
   });
 };
 
@@ -146,6 +265,8 @@ export default {
   findUnitsByProduct,
   updateProductUnit,
   deleteProductUnit,
-  updateStock,
+  findBranchProduct,
   getLowStockProducts,
+  getBranchProducts,
+  updateBranchProductStock,
 };

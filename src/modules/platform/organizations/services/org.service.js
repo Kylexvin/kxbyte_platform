@@ -235,7 +235,54 @@ const getOrganizationMembers = async (organizationId, userId) => {
     throw new Error('You do not have access to this organization');
   }
 
-  const members = await orgDb.findMembershipsByOrganization(organizationId);
+  // If user has all branches, return all members
+  if (membership.hasAllBranches) {
+    const members = await orgDb.findMembershipsByOrganization(organizationId);
+    return members;
+  }
+
+  // Otherwise, get user's assigned branches
+  const assignments = await prisma.branchAssignment.findMany({
+    where: { membershipId: membership.id },
+    select: { branchId: true },
+  });
+  const assignedBranchIds = assignments.map(a => a.branchId);
+
+  if (assignedBranchIds.length === 0) {
+    throw new Error('You do not have access to any branch');
+  }
+
+  // Get all members who have assignments to these branches
+  // or have all branches access (owners/managers)
+  const members = await prisma.membership.findMany({
+    where: {
+      organizationId,
+      isActive: true,
+      OR: [
+        { hasAllBranches: true },
+        {
+          branchAssignments: {
+            some: {
+              branchId: { in: assignedBranchIds },
+            },
+          },
+        },
+      ],
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      role: true,
+    },
+    orderBy: { joinedAt: 'desc' },
+  });
+
   return members;
 };
 

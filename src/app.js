@@ -4,6 +4,10 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import session from 'express-session';
+import passport from './modules/platform/identity/config/passport.config.js';
+import platformPermissions from './modules/platform/permissions.js';
+
 
 // ============================================================
 // PLATFORM MODULES
@@ -19,9 +23,6 @@ import notifications from './modules/platform/notifications/index.js';
 import payment from './modules/platform/payment/index.js';
 import branches from './modules/platform/branches/index.js';
 import support from './modules/platform/support/index.js';
-
-
-
 
 // ============================================================
 // PRODUCTS
@@ -43,6 +44,24 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
+
+// ============================================================
+// SESSION & PASSPORT (for social auth)
+// ============================================================
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'session-secret-change-me',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
+  })
+);
+app.use(passport.initialize());
+app.use(passport.session());
 
 // ============================================================
 // MODULE REGISTRATION
@@ -73,6 +92,11 @@ if (kxtill && kxtill.register) {
 // ============================================================
 
 export async function initializeProducts() {
+  // 1. Register platform permissions first
+  await authorization.registerPermissions('platform', platformPermissions);
+  console.log(`✅ Registered ${platformPermissions.length} platform permissions`);
+
+  // 2. Register product permissions and plans
   for (const [key, product] of Object.entries(productRegistry)) {
     // Register product permissions
     if (product.permissions?.length) {
