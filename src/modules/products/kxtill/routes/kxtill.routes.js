@@ -66,6 +66,12 @@ router.get('/dashboard/branch-overview', reportController.getBranchOverview);
 
 // Inventory alerts (branch-aware)
 router.get('/dashboard/inventory-alerts', reportController.getInventoryAlerts);
+// Inventory Dashboard routes
+router.get('/inventory/summary', reportController.getInventorySummary);
+router.get('/inventory/health', reportController.getInventoryHealth);
+router.get('/inventory/needs-attention', reportController.getNeedsAttention);
+router.get('/inventory/activity', reportController.getStockActivity);
+router.get('/inventory/branches', reportController.getBranchStock);
 
 // ============================================================
 // SETTINGS

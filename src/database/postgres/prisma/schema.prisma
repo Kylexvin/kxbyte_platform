@@ -22,16 +22,18 @@ model User {
   ownedOrganizations Organization[] @relation("OrganizationOwner")
   memberships        Membership[]
   sentInvitations    Invitation[] @relation("InvitationSender")
-  
 
   sessions          Session[]
   verificationTokens VerificationToken[]
   auditEvents       AuditEvent[]
-  notifications Notification[]
+  notifications     Notification[]
   kxtillSales       KxTillSale[]
-  supportTickets SupportTicket[]
-  supportMessages SupportMessage[]
-  socialAccounts SocialAccount[]
+  supportTickets    SupportTicket[]
+  supportMessages   SupportMessage[]
+  socialAccounts    SocialAccount[]
+
+  // ✅ Add this
+  refundedSales     KxTillSale[] @relation("RefundedByUser")
 
   @@map("users")
 }
@@ -617,9 +619,15 @@ model KxTillSale {
   userId         String
   user           User     @relation(fields: [userId], references: [id], onDelete: Restrict)
 
-  // ✅ Required
   branchId       String
   branch         Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  reference      String?
+  customerName   String?
+
+  refundedBy     String?
+  refundedByUser User?    @relation("RefundedByUser", fields: [refundedBy], references: [id], onDelete: SetNull)  // ← Add this
+  refundedAt     DateTime?
 
   subtotal       Decimal
   taxAmount      Decimal  @default(0)
@@ -640,6 +648,7 @@ model KxTillSale {
   @@index([status])
   @@index([paymentStatus])
   @@index([createdAt])
+  @@index([reference])
   @@map("kxtill_sales")
 }
 

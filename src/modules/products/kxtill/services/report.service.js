@@ -1011,6 +1011,15 @@ const getReturnsSummary = async (organizationId, userId, filters = {}) => {
   startDate.setDate(startDate.getDate() - (period === '7d' ? 7 : period === '90d' ? 90 : 30));
   startDate.setHours(0, 0, 0, 0);
 
+  // Today start
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  // Week start
+  const weekStart = new Date(now);
+  weekStart.setDate(weekStart.getDate() - 7);
+  weekStart.setHours(0, 0, 0, 0);
+
   const where = {
     organizationId,
     status: 'REFUNDED',
@@ -1021,6 +1030,19 @@ const getReturnsSummary = async (organizationId, userId, filters = {}) => {
     where.branchId = branchId;
   }
 
+  // Today where
+  const todayWhere = {
+    ...where,
+    updatedAt: { gte: todayStart },
+  };
+
+  // Week where
+  const weekWhere = {
+    ...where,
+    updatedAt: { gte: weekStart },
+  };
+
+  // Get all refunded sales (period)
   const refundedSales = await prisma.kxTillSale.findMany({
     where,
     include: {
@@ -1041,21 +1063,21 @@ const getReturnsSummary = async (organizationId, userId, filters = {}) => {
     },
   });
 
+  // Today refunds
+  const todayRefunds = refundedSales.filter(s => new Date(s.updatedAt) >= todayStart);
+  const todayTotal = todayRefunds.reduce((sum, s) => sum + Number(s.totalAmount), 0);
+
+  // Week refunds
+  const weekRefunds = refundedSales.filter(s => new Date(s.updatedAt) >= weekStart);
+  const weekTotal = weekRefunds.reduce((sum, s) => sum + Number(s.totalAmount), 0);
+
+  // Totals
   const totalReturns = refundedSales.length;
-  let totalAmount = 0;
+  const totalAmount = refundedSales.reduce((sum, s) => sum + Number(s.totalAmount), 0);
+
+  // Product breakdown
   const productMap = {};
-  const branchMap = {};
-
   for (const sale of refundedSales) {
-    totalAmount += Number(sale.totalAmount);
-
-    const branchName = sale.branch?.name || 'Unknown';
-    if (!branchMap[branchName]) {
-      branchMap[branchName] = { count: 0, total: 0 };
-    }
-    branchMap[branchName].count += 1;
-    branchMap[branchName].total += Number(sale.totalAmount);
-
     for (const item of sale.items) {
       const productName = item.product?.name || 'Unknown';
       if (!productMap[productName]) {
@@ -1066,6 +1088,35 @@ const getReturnsSummary = async (organizationId, userId, filters = {}) => {
     }
   }
 
+  // Branch breakdown
+  const branchMap = {};
+  for (const sale of refundedSales) {
+    const branchName = sale.branch?.name || 'Unknown';
+    if (!branchMap[branchName]) {
+      branchMap[branchName] = { count: 0, total: 0 };
+    }
+    branchMap[branchName].count += 1;
+    branchMap[branchName].total += Number(sale.totalAmount);
+  }
+
+  // Top returned products
+  const topReturnedProducts = Object.keys(productMap)
+    .map((name) => ({
+      name,
+      count: productMap[name].count,
+      total: productMap[name].total,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // By branch
+  const byBranch = Object.keys(branchMap).map((name) => ({
+    branchName: name,
+    count: branchMap[name].count,
+    total: branchMap[name].total,
+  }));
+
+  // Return rate
   const totalSales = await prisma.kxTillSale.count({
     where: {
       organizationId,
@@ -1076,28 +1127,303 @@ const getReturnsSummary = async (organizationId, userId, filters = {}) => {
 
   const returnRate = totalSales > 0 ? (totalReturns / totalSales) * 100 : 0;
 
-  const topReturnedProducts = Object.keys(productMap)
-    .map((name) => ({
-      name,
-      count: productMap[name].count,
-      total: productMap[name].total,
-    }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 10);
-
-  const byBranch = Object.keys(branchMap).map((name) => ({
-    branchName: name,
-    count: branchMap[name].count,
-    total: branchMap[name].total,
-  }));
-
   return {
+    today: {
+      total: todayTotal,
+      count: todayRefunds.length,
+    },
     totalReturns,
-    thisMonth: totalReturns,
+    thisMonth: totalAmount,
+    thisWeek: weekTotal,
     returnRate: Math.round(returnRate * 100) / 100,
     totalAmount,
     topReturnedProducts,
     byBranch,
+  };
+};
+
+// ============================================================
+// INVENTORY DASHBOARD
+// ============================================================
+
+// 1. Inventory Summary (Stats Cards)
+const getInventorySummary = async (organizationId, userId, branchId = null) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const whereBranch = branchId ? { branchId } : {};
+  const whereProduct = { organizationId, isActive: true };
+
+  const branchProducts = await prisma.kxTillBranchProduct.findMany({
+    where: {
+      ...whereBranch,
+      product: { organizationId, isActive: true },
+    },
+    include: {
+      product: true,
+    },
+  });
+
+  const totalProducts = await prisma.kxTillProduct.count({
+    where: { organizationId, isActive: true },
+  });
+
+  let lowStock = 0;
+  let outOfStock = 0;
+
+  for (const bp of branchProducts) {
+    const stock = Number(bp.stock);
+    const minStock = Number(bp.minStock);
+
+    if (stock === 0) outOfStock++;
+    else if (stock <= minStock) lowStock++;
+  }
+
+  return {
+    totalProducts,
+    lowStock,
+    outOfStock,
+  };
+};
+
+// 2. Inventory Health
+const getInventoryHealth = async (organizationId, userId, branchId = null) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const whereBranch = branchId ? { branchId } : {};
+  const whereProduct = { organizationId, isActive: true };
+
+  const branchProducts = await prisma.kxTillBranchProduct.findMany({
+    where: {
+      ...whereBranch,
+      product: { organizationId, isActive: true },
+    },
+  });
+
+  let total = 0;
+  let inStock = 0;
+  let lowStock = 0;
+  let outOfStock = 0;
+
+  for (const bp of branchProducts) {
+    const stock = Number(bp.stock);
+    const minStock = Number(bp.minStock);
+    total++;
+
+    if (stock === 0) outOfStock++;
+    else if (stock <= minStock) lowStock++;
+    else inStock++;
+  }
+
+  const health = total > 0 ? Math.round((inStock / total) * 100) : 0;
+
+  return {
+    health,
+    inStock,
+    lowStock,
+    outOfStock,
+  };
+};
+
+// 3. Needs Attention (Low Stock & Out of Stock)
+const getNeedsAttention = async (organizationId, userId, filters = {}) => {
+  const { branchId, status, limit = 20 } = filters;
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const whereBranch = branchId ? { branchId } : {};
+  const whereProduct = { organizationId, isActive: true };
+
+  const branchProducts = await prisma.kxTillBranchProduct.findMany({
+    where: {
+      ...whereBranch,
+      product: { organizationId, isActive: true },
+    },
+    include: {
+      product: true,
+      branch: true,
+    },
+  });
+
+  let items = [];
+
+  for (const bp of branchProducts) {
+    const stock = Number(bp.stock);
+    const minStock = Number(bp.minStock);
+    let itemStatus = '';
+
+    if (stock === 0) itemStatus = 'Out of Stock';
+    else if (stock <= minStock) itemStatus = 'Low Stock';
+
+    if (!itemStatus) continue;
+    if (status === 'low' && itemStatus !== 'Low Stock') continue;
+    if (status === 'out' && itemStatus !== 'Out of Stock') continue;
+
+    items.push({
+      id: bp.id,
+      product: bp.product?.name || 'Unknown',
+      sku: bp.product?.sku || '',
+      branch: bp.branch?.name || 'Unknown',
+      currentStock: stock,
+      minimumStock: minStock,
+      status: itemStatus,
+    });
+  }
+
+  // Sort: Out of Stock first, then Low Stock
+  items.sort((a, b) => {
+    if (a.status === 'Out of Stock' && b.status !== 'Out of Stock') return -1;
+    if (a.status !== 'Out of Stock' && b.status === 'Out of Stock') return 1;
+    return 0;
+  });
+
+  // Limit
+  items = items.slice(0, limit);
+
+  const lowStockCount = items.filter(i => i.status === 'Low Stock').length;
+  const outOfStockCount = items.filter(i => i.status === 'Out of Stock').length;
+
+  return {
+    items,
+    lowStockCount,
+    outOfStockCount,
+  };
+};
+
+// 4. Recent Stock Activity
+const getStockActivity = async (organizationId, userId, filters = {}) => {
+  const { branchId, period = 'today', activityType, limit = 10 } = filters;
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  // Calculate date range
+  const now = new Date();
+  let startDate = new Date(now);
+  startDate.setHours(0, 0, 0, 0);
+
+  if (period === '7d') {
+    startDate.setDate(startDate.getDate() - 7);
+  } else if (period === '30d') {
+    startDate.setDate(startDate.getDate() - 30);
+  }
+
+  // Get sales for the period
+  const sales = await prisma.kxTillSale.findMany({
+    where: {
+      organizationId,
+      branchId: branchId || undefined,
+      createdAt: { gte: startDate },
+      status: 'COMPLETED',
+    },
+    include: {
+      items: {
+        include: {
+          product: true,
+        },
+      },
+      user: true,
+      branch: true,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: limit * 2, // Get more to filter
+  });
+
+  const activities = [];
+
+  for (const sale of sales) {
+    for (const item of sale.items) {
+      if (activityType && activityType !== 'sale') continue;
+      activities.push({
+        id: `${sale.id}-${item.id}`,
+        time: sale.createdAt,
+        product: item.product?.name || 'Unknown',
+        productId: item.productId,
+        activity: 'Sale',
+        quantity: -Number(item.baseQuantity || item.quantity),
+        branch: sale.branch?.name || 'Unknown',
+        user: sale.user?.firstName || 'Unknown',
+      });
+    }
+  }
+
+  // Sort by time
+  activities.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+  return {
+    items: activities.slice(0, limit),
+    total: activities.length,
+  };
+};
+
+// 5. Stock Across Branches (Owner only)
+const getBranchStock = async (organizationId, userId) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (organization.ownerId !== userId) {
+    throw new Error('Only the organization owner can view branch stock breakdown');
+  }
+
+  const branches = await prisma.branch.findMany({
+    where: { organizationId, isActive: true },
+  });
+
+  let totalProducts = 0;
+  let totalLowStock = 0;
+  let totalOutOfStock = 0;
+
+  const branchData = await Promise.all(
+    branches.map(async (branch) => {
+      const branchProducts = await prisma.kxTillBranchProduct.findMany({
+        where: { branchId: branch.id },
+        include: {
+          product: true,
+        },
+      });
+
+      let lowStock = 0;
+      let outOfStock = 0;
+      const productCount = branchProducts.length;
+
+      for (const bp of branchProducts) {
+        const stock = Number(bp.stock);
+        const minStock = Number(bp.minStock);
+
+        if (stock === 0) outOfStock++;
+        else if (stock <= minStock) lowStock++;
+      }
+
+      totalProducts += productCount;
+      totalLowStock += lowStock;
+      totalOutOfStock += outOfStock;
+
+      return {
+        branchId: branch.id,
+        branch: branch.name,
+        products: productCount,
+        lowStock,
+        outOfStock,
+      };
+    })
+  );
+
+  return {
+    branches: branchData,
+    totalProducts,
+    totalLowStock,
+    totalOutOfStock,
   };
 };
 
@@ -1117,4 +1443,9 @@ export default {
   getPaymentMethodDistribution,
   getBranchBreakdown,
   getReturnsSummary,
+  getInventorySummary,
+  getInventoryHealth,
+  getNeedsAttention,
+  getStockActivity,
+  getBranchStock,
 };

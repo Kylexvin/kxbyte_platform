@@ -11,6 +11,16 @@ const checkPermission = async (userId, organizationId, permissionKey) => {
   return authorizationService.checkPermission(userId, organizationId, permissionKey);
 };
 
+// ============================================================
+// HELPERS
+// ============================================================
+
+const generateReference = () => {
+  const timestamp = Date.now().toString().slice(-8);
+  const random = Math.random().toString(36).substring(2, 5).toUpperCase();
+  return `INV-${timestamp}-${random}`;
+};
+
 const createSale = async (userId, organizationId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -30,8 +40,6 @@ const createSale = async (userId, organizationId, data) => {
   let subtotal = 0;
   let taxAmount = 0;
   const saleItems = [];
-
-  // ✅ Declare branchProduct outside loop so it's accessible later
   let currentBranchProduct = null;
 
   for (const item of data.items) {
@@ -50,7 +58,6 @@ const createSale = async (userId, organizationId, data) => {
     const baseQuantity = quantity * conversionQty;
     const unitPrice = Number(unit.price || product.price);
 
-    // Check branch inventory
     const branchProduct = await prisma.kxTillBranchProduct.findFirst({
       where: {
         productId: product.id,
@@ -88,28 +95,31 @@ const createSale = async (userId, organizationId, data) => {
       total: total + tax,
     });
 
-    // Update branch inventory
     await prisma.kxTillBranchProduct.update({
       where: { id: branchProduct.id },
       data: { stock: { decrement: baseQuantity } },
     });
 
-    // ✅ Store for later use
     currentBranchProduct = branchProduct;
   }
 
   const totalAmount = subtotal + taxAmount;
 
+  // ✅ Generate reference
+  const reference = generateReference();
+
   const sale = await saleDb.createSale({
     organizationId,
     userId,
+    reference,
+    customerName: data.customerName || 'Walk-in',
+    branchId: data.branchId,
     subtotal,
     taxAmount,
     discount: 0,
     totalAmount,
     status: 'COMPLETED',
     paymentStatus: 'PAID',
-    branchId: data.branchId,
   });
 
   for (const item of saleItems) {
@@ -138,6 +148,7 @@ const createSale = async (userId, organizationId, data) => {
     metadata: {
       total: totalAmount,
       items: saleItems.length,
+      reference,
     },
   });
 
@@ -167,7 +178,7 @@ const getSale = async (organizationId, userId, saleId) => {
   return sale;
 };
 
-const refundSale = async (organizationId, userId, saleId) => {
+const refundSale = async (organizationId, userId, saleId, branchId = null) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
@@ -183,13 +194,29 @@ const refundSale = async (organizationId, userId, saleId) => {
     throw new Error('Sale not found');
   }
 
+  // ✅ Check branch isolation
+  if (branchId && sale.branchId !== branchId) {
+    throw new Error('You can only refund sales from your assigned branch');
+  }
+
+  // If no branchId provided, check if user has all branches access
+  if (!branchId) {
+    const hasAllBranches = membership.hasAllBranches || false;
+    if (!hasAllBranches) {
+      throw new Error('Branch is required to refund this sale');
+    }
+  }
+
   if (sale.status === 'REFUNDED') {
     throw new Error('Sale already refunded');
   }
 
+  if (sale.status === 'VOIDED') {
+    throw new Error('Sale is voided and cannot be refunded');
+  }
+
   // Restore stock for each item
   for (const item of sale.items) {
-    // Update branch product stock
     await prisma.kxTillBranchProduct.update({
       where: { id: item.branchProductId },
       data: {
@@ -200,7 +227,7 @@ const refundSale = async (organizationId, userId, saleId) => {
     });
   }
 
-  const updated = await saleDb.updateSaleStatus(saleId, 'REFUNDED');
+  const updated = await saleDb.updateSaleStatus(saleId, 'REFUNDED', userId);
 
   await audit.log({
     organizationId,
@@ -210,6 +237,8 @@ const refundSale = async (organizationId, userId, saleId) => {
     resourceId: saleId,
     metadata: {
       originalTotal: sale.totalAmount,
+      refundedBy: userId,
+      branchId: sale.branchId,
     },
   });
 

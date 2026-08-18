@@ -29,9 +29,19 @@ const findSaleById = async (id, organizationId) => {
           lastName: true,
         },
       },
+      refundedByUser: {  // ← Add this
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+      branch: true,
     },
   });
 };
+
 
 const findSalesByOrganization = async (organizationId, filters = {}) => {
   const { limit = 50, offset = 0, startDate, endDate, status } = filters;
@@ -60,6 +70,15 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
             lastName: true,
           },
         },
+        refundedByUser: {  // ← Add this
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        branch: true,
       },
       orderBy: { createdAt: 'desc' },
       skip: offset,
@@ -71,10 +90,14 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
   return { items, total, limit, offset };
 };
 
-const updateSaleStatus = async (id, status) => {
+const updateSaleStatus = async (id, status, userId = null) => {
+  const data = { status };
+  if (userId) {
+    data.updatedBy = userId; // Add this field if you have it
+  }
   return prisma.kxTillSale.update({
     where: { id },
-    data: { status },
+    data,
   });
 };
 
