@@ -88,12 +88,26 @@ const findSocialAccountByUser = async (userId, provider) => {
   });
 };
 
+
 const createSocialAccount = async (data) => {
   return prisma.socialAccount.create({ data });
 };
 
 const deleteSocialAccount = async (id) => {
   return prisma.socialAccount.delete({ where: { id } });
+};
+
+const findOrganizationsByUserId = async (userId) => {
+  return prisma.organization.findMany({
+    where: {
+      memberships: {
+        some: {
+          userId,
+          isActive: true,
+        },
+      },
+    },
+  });
 };
 
 
@@ -116,4 +130,5 @@ export default {
   findSocialAccountByUser,
   createSocialAccount,
   deleteSocialAccount,
+  findOrganizationsByUserId,
 };

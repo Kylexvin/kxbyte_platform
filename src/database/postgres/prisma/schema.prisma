@@ -32,7 +32,10 @@ model User {
   supportMessages   SupportMessage[]
   socialAccounts    SocialAccount[]
 
-  // ✅ Add this
+  initiatedTransfers KxTillTransfer[] @relation("InitiatedBy")
+  approvedTransfers  KxTillTransfer[] @relation("ApprovedBy")
+  rejectedTransfers  KxTillTransfer[] @relation("RejectedBy")
+  completedTransfers KxTillTransfer[] @relation("CompletedBy")
   refundedSales     KxTillSale[] @relation("RefundedByUser")
 
   @@map("users")
@@ -103,6 +106,7 @@ model Organization {
   kxtillStoreSetting KxTillStoreSetting?
   branches       Branch[]
   supportTickets SupportTicket[]
+  kxtillTransfers KxTillTransfer[]
 
   @@index([ownerId])
   @@index([slug])
@@ -540,6 +544,7 @@ model KxTillBranchProduct {
   product        KxTillProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
   branchId       String
   branch         Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  
 
   displayName    String?
   description    String?
@@ -549,9 +554,12 @@ model KxTillBranchProduct {
 
   unitPrices     KxTillBranchProductUnitPrice[]
   saleItems      KxTillSaleItem[]
+  sourceTransfers KxTillTransfer[] @relation("SourceTransfer")
+  destTransfers   KxTillTransfer[] @relation("DestTransfer")
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  
 
   @@unique([productId, branchId])
   @@index([productId])
@@ -579,6 +587,7 @@ model KxTillBranchProductUnitPrice {
   @@index([unitId])
   @@map("kxtill_branch_product_unit_prices")
 }
+
 // ============================================================
 // KXTILL - PRODUCT UNITS
 // ============================================================
@@ -606,6 +615,66 @@ model KxTillProductUnit {
   @@unique([productId, abbreviation])
   @@index([productId])
   @@map("kxtill_product_units")
+}
+
+// ============================================================
+// KXTILL - STOCK TRANSFERS
+// ============================================================
+
+model KxTillTransfer {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  reference      String   @unique
+
+  sourceBranchProductId String
+  sourceBranchProduct   KxTillBranchProduct @relation("SourceTransfer", fields: [sourceBranchProductId], references: [id], onDelete: Restrict)
+
+  destBranchProductId   String
+  destBranchProduct     KxTillBranchProduct @relation("DestTransfer", fields: [destBranchProductId], references: [id], onDelete: Restrict)
+
+  quantitySent   Decimal
+  quantityReceived Decimal?
+
+  sourceStockBefore Decimal?
+  sourceStockAfter  Decimal?
+
+  destStockBefore   Decimal?
+  destStockAfter    Decimal?
+
+  status         String @default("PENDING") // PENDING, APPROVED, COMPLETED, REJECTED, FAILED
+
+  initiatedById  String
+  initiatedBy    User @relation("InitiatedBy", fields: [initiatedById], references: [id], onDelete: Restrict)
+
+  notes          String?
+
+  approvedById   String?
+  approvedBy     User? @relation("ApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  approvedAt     DateTime?
+
+  rejectedById   String?
+  rejectedBy     User? @relation("RejectedBy", fields: [rejectedById], references: [id], onDelete: SetNull)
+
+  rejectedAt     DateTime?
+  rejectionReason String?
+
+  completedById  String?
+  completedBy    User? @relation("CompletedBy", fields: [completedById], references: [id], onDelete: SetNull)
+
+  completedAt    DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([sourceBranchProductId])
+  @@index([destBranchProductId])
+  @@index([status])
+  @@index([reference])
+  @@map("kxtill_transfers")
 }
 
 // ============================================================
@@ -744,6 +813,27 @@ model KxTillStoreSetting {
 
   showTax        Boolean  @default(false)
   showCustomer   Boolean  @default(false)
+
+
+  showCashier    Boolean  @default(true)
+  currency       String?  // Override org currency
+  timezone       String?  // Override org timezone
+  decimalPlaces  Int      @default(2)
+  defaultPaymentMethod String @default("CASH")
+
+  // Notification settings
+  lowStockAlerts      Boolean @default(true)
+  dailySalesReport    Boolean @default(false)
+  weeklySummary       Boolean @default(true)
+  refundNotifications Boolean @default(true)
+
+  // Security settings
+  sessionTimeout       Int  @default(30)
+  requirePinForRefund  Boolean @default(true)
+  auditLogRetention    Int  @default(90)
+
+  // Branch settings
+  allowBranchSwitch Boolean @default(true)
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -884,3 +974,4 @@ model SocialAccount {
   @@index([provider])
   @@map("social_accounts")
 }
+

@@ -234,6 +234,54 @@ const updateBranchProductStock = async (req, res) => {
   }
 };
 
+const bulkCreateProducts = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const { products } = req.body;
+
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: 'Products array is required' });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < products.length; i++) {
+      const productData = products[i];
+      try {
+        // Validate required fields
+        if (!productData.name) {
+          errors.push({ index: i, error: 'Product name is required', data: productData });
+          continue;
+        }
+        if (!productData.baseUnit) {
+          errors.push({ index: i, error: 'Base unit is required', data: productData });
+          continue;
+        }
+
+        const product = await productService.createProduct(userId, organizationId, productData);
+        results.push(product);
+      } catch (error) {
+        errors.push({ index: i, error: error.message, data: productData });
+      }
+    }
+
+    res.status(201).json({
+      message: `Created ${results.length} products, ${errors.length} failed`,
+      results,
+      errors,
+    });
+  } catch (error) {
+    console.error('Bulk create products error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   createProduct,
   getProducts,
@@ -243,4 +291,5 @@ export default {
   getLowStockProducts,
   getBranchProducts,
   updateBranchProductStock,
+  bulkCreateProducts
 };

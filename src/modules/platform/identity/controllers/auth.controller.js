@@ -21,7 +21,7 @@ const register = async (req, res) => {
   }
 };
 
-// Only change login
+
 const login = async (req, res) => {
   const validation = authValidator.validateLogin(req.body);
   if (!validation.valid) {

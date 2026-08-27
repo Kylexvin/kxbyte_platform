@@ -142,8 +142,30 @@ const findBranchProduct = async (productId, branchId) => {
   });
 };
 
+const findBranchProductById = async (id, organizationId) => {
+  return prisma.kxTillBranchProduct.findFirst({
+    where: { id, product: { organizationId } },
+    include: {
+      product: true,
+      branch: true,
+    },
+  });
+};
+
+const findBranchProductsByBranch = async (branchId, organizationId) => {
+  return prisma.kxTillBranchProduct.findMany({
+    where: {
+      branchId,
+      product: { organizationId },
+      isAvailable: true,
+    },
+    include: {
+      product: true,
+    },
+  });
+};
+
 const getLowStockProducts = async (organizationId) => {
-  // Get all branch products with low stock
   const branchProducts = await prisma.kxTillBranchProduct.findMany({
     where: {
       product: {
@@ -254,6 +276,17 @@ const updateBranchProductStock = async (branchProductId, data) => {
   });
 };
 
+const updateStock = async (branchProductId, quantity) => {
+  return prisma.kxTillBranchProduct.update({
+    where: { id: branchProductId },
+    data: {
+      stock: {
+        increment: quantity,
+      },
+    },
+  });
+};
+
 export default {
   createProduct,
   findProductById,
@@ -266,7 +299,10 @@ export default {
   updateProductUnit,
   deleteProductUnit,
   findBranchProduct,
+  findBranchProductById,
+  findBranchProductsByBranch,
   getLowStockProducts,
   getBranchProducts,
   updateBranchProductStock,
+  updateStock,
 };

@@ -80,12 +80,7 @@ const restoreOrganization = async (id) => {
 const findArchivedOrganizationsByUserId = async (userId) => {
   return prisma.organization.findMany({
     where: {
-      memberships: {
-        some: {
-          userId,
-          isActive: true,
-        },
-      },
+      ownerId: userId,
       isArchived: true,
     },
     orderBy: { updatedAt: 'desc' },

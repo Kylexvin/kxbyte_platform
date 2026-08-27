@@ -14,15 +14,39 @@ const getSettings = async (organizationId, userId) => {
   const org = await orgDb.findOrganizationById(organizationId);
 
   return {
+    // Store info
     shopName: settings?.shopName || org.name,
     shopPhone: settings?.shopPhone || org.phone,
     shopAddress: settings?.shopAddress || org.address,
     shopEmail: settings?.shopEmail || org.email,
     taxNumber: settings?.taxNumber || null,
-    receiptFooter: settings?.receiptFooter || 'Thank you for shopping!',
+
+    // Receipt
     receiptHeader: settings?.receiptHeader || '',
-    showTax: settings?.showTax || false,
-    showCustomer: settings?.showCustomer || false,
+    receiptFooter: settings?.receiptFooter || 'Thank you for shopping!',
+    showTax: settings?.showTax ?? false,
+    showCustomer: settings?.showCustomer ?? false,
+    showCashier: settings?.showCashier ?? true,
+
+    // General
+    currency: settings?.currency || org.currency || 'KES',
+    timezone: settings?.timezone || org.timezone || 'Africa/Nairobi',
+    decimalPlaces: settings?.decimalPlaces ?? 2,
+    defaultPaymentMethod: settings?.defaultPaymentMethod || 'CASH',
+
+    // Notifications
+    lowStockAlerts: settings?.lowStockAlerts ?? true,
+    dailySalesReport: settings?.dailySalesReport ?? false,
+    weeklySummary: settings?.weeklySummary ?? true,
+    refundNotifications: settings?.refundNotifications ?? true,
+
+    // Security
+    sessionTimeout: settings?.sessionTimeout ?? 30,
+    requirePinForRefund: settings?.requirePinForRefund ?? true,
+    auditLogRetention: settings?.auditLogRetention ?? 90,
+
+    // Branch
+    allowBranchSwitch: settings?.allowBranchSwitch ?? true,
   };
 };
 
@@ -32,7 +56,6 @@ const updateSettings = async (organizationId, userId, data) => {
     throw new Error('You do not have access to this organization');
   }
 
-  // Check if user has permission (owner or manager)
   const org = await orgDb.findOrganizationById(organizationId);
   if (org.ownerId !== userId) {
     throw new Error('Only the organization owner can update store settings');

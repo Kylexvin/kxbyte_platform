@@ -69,6 +69,8 @@ const register = async (data) => {
   };
 };
 
+// src/modules/platform/identity/services/auth.service.js
+
 const login = async (email, plainPassword, req = null) => {
   const user = await authDb.findUserByEmail(email);
   if (!user) {
@@ -88,6 +90,17 @@ const login = async (email, plainPassword, req = null) => {
     refreshToken,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
+
+  // ✅ Get user's organizations
+  const organizations = await authDb.findOrganizationsByUserId(user.id);
+
+  // Format organizations for frontend
+  const formattedOrgs = organizations.map((org) => ({
+    id: org.id,
+    name: org.name,
+    slug: org.slug,
+    role: org.ownerId === user.id ? 'Owner' : 'Member',
+  }));
 
   // Audit log: User logged in
   await logAudit({
@@ -125,6 +138,7 @@ const login = async (email, plainPassword, req = null) => {
     user: userWithoutPassword,
     accessToken,
     refreshToken,
+    organizations: formattedOrgs, 
   };
 };
 

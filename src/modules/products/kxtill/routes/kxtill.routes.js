@@ -6,6 +6,9 @@ import saleController from '../controllers/sale.controller.js';
 import reportController from '../controllers/report.controller.js';
 import settingController from '../controllers/setting.controller.js';
 import receiptController from '../controllers/receipt.controller.js';
+import exportController from '../controllers/export.controller.js';
+import transferController from '../transfer/controllers/transfer.controller.js';
+import staffController from '../controllers/staff.controller.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 
 const router = express.Router({ mergeParams: true });
@@ -17,6 +20,7 @@ router.use(authMiddleware.authenticate);
 // ============================================================
 router.post('/products', productController.createProduct);
 router.get('/products', productController.getProducts);
+router.post('/products/bulk', productController.bulkCreateProducts);
 router.get('/products/:productId', productController.getProduct);
 router.patch('/products/:productId', productController.updateProduct);
 router.delete('/products/:productId', productController.deleteProduct);
@@ -35,6 +39,18 @@ router.get('/sales', saleController.getSales);
 router.get('/sales/:saleId', saleController.getSale);
 router.post('/sales/:saleId/refund', saleController.refundSale);
 router.get('/sales/:saleId/receipt', receiptController.generateReceipt);
+
+// ============================================================
+// TRANSFER ROUTES
+// ============================================================
+router.post('/transfers', transferController.createTransfer);
+router.get('/transfers', transferController.getTransfers);
+router.get('/transfers/stats', transferController.getTransferStats);
+router.get('/transfers/form-data', transferController.getTransferFormData);
+router.get('/transfers/:transferId', transferController.getTransfer);
+router.patch('/transfers/:transferId/approve', transferController.approveTransfer);
+router.patch('/transfers/:transferId/complete', transferController.completeTransfer);
+router.patch('/transfers/:transferId/reject', transferController.rejectTransfer);
 
 // ============================================================
 // DASHBOARD ROUTES
@@ -60,12 +76,12 @@ router.get('/dashboard/returns-summary', reportController.getReturnsSummary);
 // Low stock (branch-aware)
 router.get('/dashboard/low-stock', reportController.getLowStock);
 
-
 // Branch overview
 router.get('/dashboard/branch-overview', reportController.getBranchOverview);
 
 // Inventory alerts (branch-aware)
 router.get('/dashboard/inventory-alerts', reportController.getInventoryAlerts);
+
 // Inventory Dashboard routes
 router.get('/inventory/summary', reportController.getInventorySummary);
 router.get('/inventory/health', reportController.getInventoryHealth);
@@ -78,5 +94,22 @@ router.get('/inventory/branches', reportController.getBranchStock);
 // ============================================================
 router.get('/settings', settingController.getSettings);
 router.patch('/settings', settingController.updateSettings);
+
+// ============================================================
+// EXPORTS ROUTES
+// ============================================================
+router.get('/reports/export/sales', exportController.exportSales);
+router.get('/reports/export/stock', exportController.exportStock);
+router.get('/reports/export/top-products', exportController.exportTopProducts);
+router.get('/reports/export/branches', exportController.exportBranchPerformance);
+router.get('/reports/export/tax', exportController.exportTax);
+router.get('/reports/export/audit', exportController.exportAudit);
+
+// ============================================================
+// STAFF ROUTES
+// ============================================================
+router.get('/staff', staffController.getStaff);
+router.patch('/staff/:targetUserId', staffController.updateStaff);
+router.delete('/staff/:targetUserId', staffController.removeStaff);
 
 export default router;

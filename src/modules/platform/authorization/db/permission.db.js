@@ -73,6 +73,50 @@ const findPermissionById = async (id) => {
   });
 };
 
+const findPermissionsByUser = async (userId, organizationId) => {
+  // Get user's role
+  const membership = await prisma.membership.findUnique({
+    where: {
+      userId_organizationId: {
+        userId,
+        organizationId,
+      },
+    },
+    include: {
+      role: {
+        include: {
+          permissions: {
+            include: {
+              permission: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!membership || !membership.role) {
+    return [];
+  }
+
+  // If user has all branches, they might have special permissions
+  // Check if user has '* permission
+  const hasWildcard = membership.role.permissions.some(
+    (rp) => rp.permission.key === '*'
+  );
+
+  if (hasWildcard) {
+    // Return all permissions for the product
+    const allPermissions = await prisma.permission.findMany({
+      where: { productKey: 'kxtill', isActive: true },
+    });
+    return allPermissions;
+  }
+
+  return membership.role.permissions.map((rp) => rp.permission);
+};
+
+
 
 export default {
   createPermission,
@@ -83,4 +127,5 @@ export default {
   findPermissionsByKeys,
   deletePermission,
   findPermissionById,
+  findPermissionsByUser,
 };

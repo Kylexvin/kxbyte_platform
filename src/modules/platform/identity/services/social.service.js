@@ -94,11 +94,22 @@ const loginWithSocial = async (profile, provider) => {
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
 
+  // ✅ Get user's organizations
+  const organizations = await authDb.findOrganizationsByUserId(user.id);
+
+  const formattedOrgs = organizations.map((org) => ({
+    id: org.id,
+    name: org.name,
+    slug: org.slug,
+    role: org.ownerId === user.id ? 'Owner' : 'Member',
+  }));
+
   const { password: _, ...userWithoutPassword } = user;
   return {
     user: userWithoutPassword,
     accessToken,
     refreshToken,
+    organizations: formattedOrgs, // ✅ Add organizations
   };
 };
 
