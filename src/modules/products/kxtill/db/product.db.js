@@ -349,7 +349,7 @@ const findBranchProductsForSync = async (organizationId, branchId, since) => {
   });
 };
 
-const findProductsForSync = async (organizationId, since) => {
+const findProductsForSync = async (organizationId, since, limit, offset, branchId) => {
   const where = {
     organizationId,
     isActive: true,
@@ -359,17 +359,50 @@ const findProductsForSync = async (organizationId, since) => {
     where.updatedAt = { gte: new Date(since) };
   }
 
-  return prisma.kxTillProduct.findMany({
+  const products = await prisma.kxTillProduct.findMany({
     where,
     include: {
       units: true,
       baseUnit: true,
       branchProducts: {
-        where: { isAvailable: true },
+        where: { 
+          isAvailable: true,
+          ...(branchId ? { branchId } : {})  // <-- FILTER BY BRANCH
+        },
+        include: {
+          branch: true,
+        },
       },
     },
     orderBy: { updatedAt: 'asc' },
+    skip: offset,
+    take: limit,
   });
+
+  // Only include products that have branchProducts (i.e., available in this branch)
+  const items = [];
+  for (const product of products) {
+    for (const bp of product.branchProducts) {
+      items.push({
+        id: bp.id,
+        productId: product.id,
+        name: product.name,
+        displayName: bp.displayName || product.name,
+        sku: product.sku,
+        category: product.category,
+        stock: bp.stock,
+        minStock: bp.minStock,
+        isAvailable: bp.isAvailable,
+        units: product.units,
+        baseUnit: product.baseUnit,
+        branchId: bp.branchId,
+        branchName: bp.branch?.name || 'Unknown',
+        updatedAt: bp.updatedAt,
+      });
+    }
+  }
+
+  return { items, total: items.length, limit, offset };
 };
 
 export default {

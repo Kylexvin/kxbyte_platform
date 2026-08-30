@@ -399,7 +399,7 @@ const getProductsForSync = async (req, res) => {
     }
 
     const { organizationId } = req.params;
-    const { since, limit = 50, offset = 0 } = req.query;
+    const { since, limit = 50, offset = 0, branchId } = req.query; // <-- ADD branchId
 
     const membership = await orgDb.findMembership(userId, organizationId);
     if (!membership) {
@@ -410,10 +410,10 @@ const getProductsForSync = async (req, res) => {
       organizationId,
       since,
       parseInt(limit),
-      parseInt(offset)
+      parseInt(offset),
+      branchId // <-- PASS branchId
     );
 
-    // ✅ Consistent shape with branch-products sync
     res.status(200).json({
       items: result.items,
       total: result.total,

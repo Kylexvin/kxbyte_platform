@@ -405,18 +405,11 @@ const updateProductUnit = async (organizationId, userId, productId, unitId, data
   return updated;
 };
 
-const getProductsForSync = async (organizationId, since) => {
-  const where = {
-    organizationId,
-    isActive: true,
-  };
-
-  if (since) {
-    where.updatedAt = { gte: new Date(since) };
-  }
-
-  const products = await productDb.findProductsForSync(organizationId, since);
-  return products;
+const getProductsForSync = async (organizationId, since, limit = 50, offset = 0, branchId) => {
+  const result = await productDb.findProductsForSync(organizationId, since, limit, offset, branchId);
+  
+  // result is already flattened with { items, total, limit, offset }
+  return result;
 };
 
 const getBranchProductsForSync = async (organizationId, branchId, since, limit = 50, offset = 0) => {
@@ -451,7 +444,25 @@ const getBranchProductsForSync = async (organizationId, branchId, since, limit =
     prisma.kxTillBranchProduct.count({ where }),
   ]);
 
-  return { items, total, limit, offset };
+  // Format items consistently
+  const formattedItems = items.map((item) => ({
+    id: item.id,
+    productId: item.productId,
+    name: item.product?.name || 'Unknown',
+    displayName: item.displayName || item.product?.name || 'Unknown',
+    sku: item.product?.sku || null,
+    category: item.product?.category || null,
+    stock: item.stock,
+    minStock: item.minStock,
+    isAvailable: item.isAvailable,
+    units: item.product?.units || [],
+    baseUnit: item.product?.baseUnit || null,
+    branchId: item.branchId,
+    branchName: item.branch?.name || 'Unknown',
+    updatedAt: item.updatedAt,
+  }));
+
+  return { items: formattedItems, total, limit, offset };
 };
 
 export default {
