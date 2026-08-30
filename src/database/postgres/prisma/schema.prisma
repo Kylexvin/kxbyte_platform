@@ -694,8 +694,8 @@ model KxTillSale {
   reference      String?
   customerName   String?
 
-  // ✅ Offline sync fields
-  clientSaleId   String  @unique  // Required for idempotency
+ 
+  clientSaleId   String? @unique
   deviceId       String?
   syncedAt       DateTime?
 

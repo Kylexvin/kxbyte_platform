@@ -10,6 +10,30 @@ const createSale = async (data) => {
   return prisma.kxTillSale.create({ data });
 };
 
+const findSaleByClientId = async (clientSaleId) => {
+  return prisma.kxTillSale.findUnique({
+    where: { clientSaleId },
+    include: {
+      items: {
+        include: {
+          product: true,
+          unit: true,
+        },
+      },
+      payments: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+          firstName: true,
+          lastName: true,
+        },
+      },
+      branch: true,
+    },
+  });
+};
+
 const findSaleById = async (id, organizationId) => {
   return prisma.kxTillSale.findFirst({
     where: { id, organizationId },
@@ -41,7 +65,6 @@ const findSaleById = async (id, organizationId) => {
     },
   });
 };
-
 
 const findSalesByOrganization = async (organizationId, filters = {}) => {
   const { limit = 50, offset = 0, startDate, endDate, status } = filters;
@@ -129,4 +152,5 @@ export default {
   createSaleItem,
   createManySaleItems,
   createSalePayment,
+  findSaleByClientId,
 };

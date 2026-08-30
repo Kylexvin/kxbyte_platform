@@ -36,6 +36,38 @@ const createSale = async (req, res) => {
   }
 };
 
+const createOfflineSale = async (req, res) => {
+  const validation = saleValidator.validateCreateSale(req.body);
+  if (!validation.valid) {
+    return res.status(400).json({ errors: validation.errors });
+  }
+
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const sale = await saleService.createOfflineSale(userId, organizationId, req.body);
+    res.status(201).json({ sale });
+  } catch (error) {
+    if (error.message === 'Organization not found' ||
+        error.message === 'Branch not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    if (error.message === 'You do not have access to this organization' ||
+        error.message === 'You do not have permission to create sales') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message.includes('Insufficient stock')) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Create offline sale error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 const getSales = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -117,4 +149,5 @@ export default {
   getSales,
   getSale,
   refundSale,
+  createOfflineSale,
 };

@@ -3,10 +3,10 @@
 import saleDb from '../db/sale.db.js';
 import productDb from '../db/product.db.js';
 import orgDb from '../../../platform/organizations/db/org.db.js';
+import branchDb from '../../../platform/branches/db/branch.db.js';
 import audit from '../../../platform/audit/index.js';
 import authorizationService from '../../../platform/authorization/services/authorization.service.js';
 import prisma from '../../../../database/postgres/prisma.js';
-
 const checkPermission = async (userId, organizationId, permissionKey) => {
   return authorizationService.checkPermission(userId, organizationId, permissionKey);
 };
@@ -155,6 +155,159 @@ const createSale = async (userId, organizationId, data) => {
   return saleDb.findSaleById(sale.id, organizationId);
 };
 
+const createOfflineSale = async (userId, organizationId, data) => {
+  const { clientSaleId, branchId, customerName, items, paymentMethod, paymentReference } = data;
+
+  // Check if sale already exists (idempotency)
+  if (clientSaleId) {
+    const existing = await saleDb.findSaleByClientId(clientSaleId);
+    if (existing) {
+      return existing;
+    }
+  }
+
+  // Validate organization and branch
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (!organization) {
+    throw new Error('Organization not found');
+  }
+
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const branch = await branchDb.findBranchById(branchId, organizationId);
+  if (!branch) {
+    throw new Error('Branch not found');
+  }
+
+  // Check permission
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.create');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to create sales');
+  }
+
+  // ✅ Generate reference
+  const reference = generateReference();
+
+  let subtotal = 0;
+  let taxAmount = 0;
+  const saleItems = [];
+
+  // Process items
+  for (const item of data.items) {
+    const product = await productDb.findProductById(item.productId, organizationId);
+    if (!product) {
+      throw new Error(`Product ${item.productId} not found`);
+    }
+
+    const branchProduct = await productDb.findBranchProductById(item.branchProductId, organizationId);
+    if (!branchProduct) {
+      throw new Error(`Branch product ${item.branchProductId} not found`);
+    }
+
+    const unit = await productDb.findUnitById(item.unitId, item.productId);
+    if (!unit) {
+      throw new Error(`Unit ${item.unitId} not found`);
+    }
+
+    const quantity = Number(item.quantity);
+    const conversionQty = Number(unit.conversionQty);
+    const baseQuantity = quantity * conversionQty;
+    const unitPrice = Number(item.unitPrice || unit.price || product.price);
+
+    // Check stock
+    if (product.trackInventory) {
+      const stock = Number(branchProduct.stock);
+      if (stock < baseQuantity) {
+        throw new Error(`Insufficient stock for ${product.name}. Available: ${stock}`);
+      }
+    }
+
+    const total = quantity * unitPrice;
+    const tax = total * (Number(product.taxRate) / 100);
+
+    subtotal += total;
+    taxAmount += tax;
+
+    saleItems.push({
+      productId: product.id,
+      unitId: unit.id,
+      branchProductId: branchProduct.id,
+      unitName: unit.name,
+      unitAbbrev: unit.abbreviation,
+      unitType: unit.unitType,
+      quantity: quantity,
+      conversionQty: conversionQty,
+      unitPrice: unitPrice,
+      baseQuantity: baseQuantity,
+      taxRate: Number(product.taxRate),
+      taxAmount: tax,
+      discount: 0,
+      total: total + tax,
+    });
+
+    // Deduct stock
+    if (product.trackInventory) {
+      await productDb.updateStock(branchProduct.id, -baseQuantity);
+    }
+  }
+
+  const totalAmount = subtotal + taxAmount;
+
+  // Create sale with reference
+  const sale = await saleDb.createSale({
+    organizationId,
+    userId,
+    branchId,
+    clientSaleId: clientSaleId || null,
+    customerName: customerName || null,
+    reference: reference, // ✅ Now using generated reference
+    subtotal,
+    taxAmount,
+    discount: 0,
+    totalAmount,
+    status: 'COMPLETED',
+    paymentStatus: 'PAID',
+  });
+
+  // Create sale items
+  for (const item of saleItems) {
+    await saleDb.createSaleItem({
+      ...item,
+      saleId: sale.id,
+    });
+  }
+
+  // Create payment
+  if (paymentMethod) {
+    await saleDb.createSalePayment({
+      saleId: sale.id,
+      method: paymentMethod,
+      amount: totalAmount,
+      reference: paymentReference || null,
+    });
+  }
+
+  // Audit log
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'KXTILL_SALE_CREATED_OFFLINE',
+    resource: 'sale',
+    resourceId: sale.id,
+    metadata: {
+      clientSaleId,
+      reference,
+      total: totalAmount,
+      items: saleItems.length,
+    },
+  });
+
+  return saleDb.findSaleById(sale.id, organizationId);
+};
+
 const getSales = async (organizationId, userId, filters) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
@@ -250,4 +403,5 @@ export default {
   getSales,
   getSale,
   refundSale,
+  createOfflineSale
 };

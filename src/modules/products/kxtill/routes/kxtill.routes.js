@@ -41,11 +41,16 @@ router.patch('/branches/:branchId/products/:productId/stock', productController.
 // SALE ROUTES
 // ============================================================
 router.post('/sales', saleController.createSale);
+router.post('/sales/offline', saleController.createOfflineSale);
 router.get('/sales', saleController.getSales);
 router.get('/sales/:saleId', saleController.getSale);
 router.post('/sales/:saleId/refund', saleController.refundSale);
 router.get('/sales/:saleId/receipt', receiptController.generateReceipt);
-
+// ============================================================
+// SYNC ROUTES (Offline-first)
+// ============================================================
+router.get('/sync/products', productController.getProductsForSync);
+router.get('/sync/branch-products', productController.getBranchProductsForSync);
 // ============================================================
 // TRANSFER ROUTES
 // ============================================================

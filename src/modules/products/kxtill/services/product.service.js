@@ -295,6 +295,7 @@ const searchProducts = async (organizationId, userId, searchTerm, branchId, limi
 };
 
 
+
 // ============================================================
 // BRANCH PRODUCTS
 // ============================================================
@@ -404,6 +405,54 @@ const updateProductUnit = async (organizationId, userId, productId, unitId, data
   return updated;
 };
 
+const getProductsForSync = async (organizationId, since) => {
+  const where = {
+    organizationId,
+    isActive: true,
+  };
+
+  if (since) {
+    where.updatedAt = { gte: new Date(since) };
+  }
+
+  const products = await productDb.findProductsForSync(organizationId, since);
+  return products;
+};
+
+const getBranchProductsForSync = async (organizationId, branchId, since, limit = 50, offset = 0) => {
+  const where = {
+    branchId,
+    isAvailable: true,
+    product: {
+      organizationId,
+    },
+  };
+
+  if (since) {
+    where.updatedAt = { gte: new Date(since) };
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.kxTillBranchProduct.findMany({
+      where,
+      include: {
+        product: {
+          include: {
+            units: true,
+            baseUnit: true,
+          },
+        },
+        branch: true,
+      },
+      orderBy: { updatedAt: 'asc' },
+      skip: offset,
+      take: limit,
+    }),
+    prisma.kxTillBranchProduct.count({ where }),
+  ]);
+
+  return { items, total, limit, offset };
+};
 
 export default {
   createProduct,
@@ -416,5 +465,7 @@ export default {
   updateBranchProductStock,
   getProductByBarcode,
   searchProducts,
-  updateProductUnit
+  updateProductUnit,
+  getProductsForSync,
+  getBranchProductsForSync,
 };

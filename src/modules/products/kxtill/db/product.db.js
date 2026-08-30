@@ -321,6 +321,56 @@ const findProductByBarcode = async (barcode, organizationId, branchId) => {
   return unit.product;
 };
 
+const findBranchProductsForSync = async (organizationId, branchId, since) => {
+  const where = {
+    branchId,
+    isAvailable: true,
+    product: {
+      organizationId,
+    },
+  };
+
+  if (since) {
+    where.updatedAt = { gte: new Date(since) };
+  }
+
+  return prisma.kxTillBranchProduct.findMany({
+    where,
+    include: {
+      product: {
+        include: {
+          units: true,
+          baseUnit: true,
+        },
+      },
+      branch: true,
+    },
+    orderBy: { updatedAt: 'asc' },
+  });
+};
+
+const findProductsForSync = async (organizationId, since) => {
+  const where = {
+    organizationId,
+    isActive: true,
+  };
+
+  if (since) {
+    where.updatedAt = { gte: new Date(since) };
+  }
+
+  return prisma.kxTillProduct.findMany({
+    where,
+    include: {
+      units: true,
+      baseUnit: true,
+      branchProducts: {
+        where: { isAvailable: true },
+      },
+    },
+    orderBy: { updatedAt: 'asc' },
+  });
+};
 
 export default {
   createProduct,
@@ -341,4 +391,7 @@ export default {
   updateBranchProductStock,
   updateStock,
   findProductByBarcode,
+  findProductsForSync,
+  findBranchProductsForSync, 
+
 };

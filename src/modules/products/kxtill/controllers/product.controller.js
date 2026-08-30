@@ -391,6 +391,79 @@ const searchProducts = async (req, res) => {
   }
 };
 
+const getProductsForSync = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const { since, limit = 50, offset = 0 } = req.query;
+
+    const membership = await orgDb.findMembership(userId, organizationId);
+    if (!membership) {
+      return res.status(403).json({ error: 'You do not have access to this organization' });
+    }
+
+    const result = await productService.getProductsForSync(
+      organizationId,
+      since,
+      parseInt(limit),
+      parseInt(offset)
+    );
+
+    // ✅ Consistent shape with branch-products sync
+    res.status(200).json({
+      items: result.items,
+      total: result.total,
+      limit: result.limit,
+      offset: result.offset,
+      version: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Sync products error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getBranchProductsForSync = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const { branchId, since, limit = 50, offset = 0 } = req.query;
+
+    const membership = await orgDb.findMembership(userId, organizationId);
+    if (!membership) {
+      return res.status(403).json({ error: 'You do not have access to this organization' });
+    }
+
+    const result = await productService.getBranchProductsForSync(
+      organizationId,
+      branchId,
+      since,
+      parseInt(limit),
+      parseInt(offset)
+    );
+
+    // Return consistent shape with branch products endpoint
+    res.status(200).json({
+      items: result.items,
+      total: result.total,
+      limit: result.limit,
+      offset: result.offset,
+      version: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Sync branch products error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   createProduct,
   getProducts,
@@ -404,4 +477,6 @@ export default {
   getProductByBarcode,
   searchProducts,
   updateProductUnit,
+  getProductsForSync,
+  getBranchProductsForSync
 };
