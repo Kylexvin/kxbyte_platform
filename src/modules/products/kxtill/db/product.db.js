@@ -287,6 +287,41 @@ const updateStock = async (branchProductId, quantity) => {
   });
 };
 
+
+const findProductByBarcode = async (barcode, organizationId, branchId) => {
+  // Search the units table for the barcode
+  const unit = await prisma.kxTillProductUnit.findFirst({
+    where: {
+      barcode: barcode,
+      product: {
+        organizationId,
+        isActive: true,
+      },
+    },
+    include: {
+      product: {
+        include: {
+          baseUnit: true,
+          units: true,
+          branchProducts: {
+            where: branchId ? { branchId } : {},
+            include: {
+              branch: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!unit) {
+    return null;
+  }
+
+  return unit.product;
+};
+
+
 export default {
   createProduct,
   findProductById,
@@ -305,4 +340,5 @@ export default {
   getBranchProducts,
   updateBranchProductStock,
   updateStock,
+  findProductByBarcode,
 };

@@ -16,11 +16,17 @@ const router = express.Router({ mergeParams: true });
 router.use(authMiddleware.authenticate);
 
 // ============================================================
-// PRODUCT ROUTES (Organization-level)
+// PRODUCT ROUTES
 // ============================================================
+// Static routes FIRST (no :param)
 router.post('/products', productController.createProduct);
 router.get('/products', productController.getProducts);
 router.post('/products/bulk', productController.bulkCreateProducts);
+router.get('/products/search', productController.searchProducts);
+router.get('/products/barcode/:barcode', productController.getProductByBarcode);
+
+// Dynamic routes LAST (with :param)
+router.patch('/products/:productId/units/:unitId', productController.updateProductUnit);
 router.get('/products/:productId', productController.getProduct);
 router.patch('/products/:productId', productController.updateProduct);
 router.delete('/products/:productId', productController.deleteProduct);
@@ -43,14 +49,30 @@ router.get('/sales/:saleId/receipt', receiptController.generateReceipt);
 // ============================================================
 // TRANSFER ROUTES
 // ============================================================
-router.post('/transfers', transferController.createTransfer);
-router.get('/transfers', transferController.getTransfers);
+// Static routes FIRST
 router.get('/transfers/stats', transferController.getTransferStats);
 router.get('/transfers/form-data', transferController.getTransferFormData);
+
+// Dynamic routes LAST
+router.post('/transfers', transferController.createTransfer);
+router.get('/transfers', transferController.getTransfers);
 router.get('/transfers/:transferId', transferController.getTransfer);
 router.patch('/transfers/:transferId/approve', transferController.approveTransfer);
 router.patch('/transfers/:transferId/complete', transferController.completeTransfer);
 router.patch('/transfers/:transferId/reject', transferController.rejectTransfer);
+
+// ============================================================
+// STAFF ROUTES
+// ============================================================
+router.get('/staff', staffController.getStaff);
+router.patch('/staff/:targetUserId', staffController.updateStaff);
+router.delete('/staff/:targetUserId', staffController.removeStaff);
+
+// ============================================================
+// SETTINGS
+// ============================================================
+router.get('/settings', settingController.getSettings);
+router.patch('/settings', settingController.updateSettings);
 
 // ============================================================
 // DASHBOARD ROUTES
@@ -67,7 +89,7 @@ router.get('/dashboard/top-products', reportController.getTopProducts);
 // Recent sales
 router.get('/dashboard/recent-sales', reportController.getRecentSales);
 
-// Todays's sales
+// Today's sales
 router.get('/dashboard/today-sales', reportController.getTodaySales);
 router.get('/dashboard/payment-methods', reportController.getPaymentMethodDistribution);
 router.get('/dashboard/branch-breakdown', reportController.getBranchBreakdown);
@@ -90,12 +112,6 @@ router.get('/inventory/activity', reportController.getStockActivity);
 router.get('/inventory/branches', reportController.getBranchStock);
 
 // ============================================================
-// SETTINGS
-// ============================================================
-router.get('/settings', settingController.getSettings);
-router.patch('/settings', settingController.updateSettings);
-
-// ============================================================
 // EXPORTS ROUTES
 // ============================================================
 router.get('/reports/export/sales', exportController.exportSales);
@@ -104,12 +120,5 @@ router.get('/reports/export/top-products', exportController.exportTopProducts);
 router.get('/reports/export/branches', exportController.exportBranchPerformance);
 router.get('/reports/export/tax', exportController.exportTax);
 router.get('/reports/export/audit', exportController.exportAudit);
-
-// ============================================================
-// STAFF ROUTES
-// ============================================================
-router.get('/staff', staffController.getStaff);
-router.patch('/staff/:targetUserId', staffController.updateStaff);
-router.delete('/staff/:targetUserId', staffController.removeStaff);
 
 export default router;

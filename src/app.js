@@ -8,7 +8,6 @@ import session from 'express-session';
 import passport from './modules/platform/identity/config/passport.config.js';
 import platformPermissions from './modules/platform/permissions.js';
 
-
 // ============================================================
 // PLATFORM MODULES
 // ============================================================
@@ -41,7 +40,38 @@ const app = express();
 // ============================================================
 
 app.use(helmet());
-app.use(cors());
+
+// ============================================================
+// CORS CONFIGURATION (Option 1)
+// ============================================================
+
+const corsOptions = {
+  origin: [
+    'http://localhost:3000',           // React dev server
+    'http://localhost:3001',           // Alternative port
+    'http://127.0.0.1:3000',          // Localhost IP
+    process.env.FRONTEND_URL,          // Production frontend
+  ].filter(Boolean),                   // Remove undefined values
+  credentials: true,                   // Allow cookies and auth headers
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Allow-Origin',
+    'Access-Control-Allow-Credentials',
+  ],
+  exposedHeaders: ['Content-Length', 'X-Content-Type-Options'],
+  maxAge: 86400, // 24 hours
+};
+
+app.use(cors(corsOptions));
+
+// ============================================================
+// OPTIONS PRE-FLIGHT HANDLING
+// ============================================================
 app.use(express.json());
 app.use(morgan('dev'));
 
@@ -94,20 +124,20 @@ if (kxtill && kxtill.register) {
 export async function initializeProducts() {
   // 1. Register platform permissions first
   await authorization.registerPermissions('platform', platformPermissions);
-  console.log(`✅ Registered ${platformPermissions.length} platform permissions`);
+  console.log(`Registered ${platformPermissions.length} platform permissions`);
 
   // 2. Register product permissions and plans
   for (const [key, product] of Object.entries(productRegistry)) {
     // Register product permissions
     if (product.permissions?.length) {
       await authorization.registerPermissions(key, product.permissions);
-      console.log(`✅ Registered ${product.permissions.length} permissions for ${product.name}`);
+      console.log(`Registered ${product.permissions.length} permissions for ${product.name}`);
     }
 
     // Register product plans
     if (product.subscription?.plans?.length) {
       await subscription.registerPlans(key, product.subscription.plans);
-      console.log(`✅ Registered ${product.subscription.plans.length} plans for ${product.name}`);
+      console.log(`Registered ${product.subscription.plans.length} plans for ${product.name}`);
     }
   }
 }

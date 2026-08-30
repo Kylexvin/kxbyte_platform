@@ -694,8 +694,13 @@ model KxTillSale {
   reference      String?
   customerName   String?
 
+  // ✅ Offline sync fields
+  clientSaleId   String  @unique  // Required for idempotency
+  deviceId       String?
+  syncedAt       DateTime?
+
   refundedBy     String?
-  refundedByUser User?    @relation("RefundedByUser", fields: [refundedBy], references: [id], onDelete: SetNull)  // ← Add this
+  refundedByUser User?    @relation("RefundedByUser", fields: [refundedBy], references: [id], onDelete: SetNull)
   refundedAt     DateTime?
 
   subtotal       Decimal
@@ -718,6 +723,7 @@ model KxTillSale {
   @@index([paymentStatus])
   @@index([createdAt])
   @@index([reference])
+  @@index([clientSaleId])
   @@map("kxtill_sales")
 }
 

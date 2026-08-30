@@ -208,6 +208,93 @@ const getLowStockProducts = async (organizationId, userId) => {
   return productDb.getLowStockProducts(organizationId);
 };
 
+const getProductByBarcode = async (organizationId, userId, barcode, branchId) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const product = await productDb.findProductByBarcode(barcode, organizationId, branchId);
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  let branchStock = null;
+  if (branchId && product.branchProducts && product.branchProducts.length > 0) {
+    const bp = product.branchProducts[0];
+    branchStock = {
+      stock: bp.stock,
+      minStock: bp.minStock,
+      isAvailable: bp.isAvailable,
+    };
+  }
+
+  return {
+    id: product.id,
+    name: product.name,
+    sku: product.sku,
+    description: product.description,
+    category: product.category,
+    price: product.price,
+    taxRate: product.taxRate,
+    baseUnit: product.baseUnit,
+    units: product.units,
+    stock: branchStock?.stock || 0,
+    isAvailable: branchStock?.isAvailable !== false,
+  };
+};
+
+const searchProducts = async (organizationId, userId, searchTerm, branchId, limit = 20) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const products = await prisma.kxTillProduct.findMany({
+    where: {
+      organizationId,
+      isActive: true,
+      OR: [
+        { name: { contains: searchTerm, mode: 'insensitive' } },
+        { sku: { contains: searchTerm, mode: 'insensitive' } },
+       
+      ],
+    },
+    include: {
+      units: true,
+      baseUnit: true,
+      branchProducts: {
+        where: { branchId },
+        include: {
+          branch: true,
+        },
+      },
+    },
+    take: limit,
+  });
+
+  return products.map((product) => {
+    const branchProduct = product.branchProducts?.[0];
+    return {
+      id: product.id,
+      productId: product.id,
+      name: product.name,
+      displayName: branchProduct?.displayName || product.name,
+      sku: product.sku,
+      category: product.category,
+      stock: branchProduct?.stock || 0,
+      minStock: branchProduct?.minStock || 0,
+      isAvailable: branchProduct?.isAvailable !== false,
+      price: branchProduct?.price || product.price,
+      baseUnit: product.baseUnit,
+      units: product.units,
+      branchId: branchId,
+      branchName: branchProduct?.branch?.name,
+    };
+  });
+};
+
+
 // ============================================================
 // BRANCH PRODUCTS
 // ============================================================
@@ -286,6 +373,38 @@ const updateBranchProductStock = async (organizationId, userId, branchId, produc
   return updated;
 };
 
+const updateProductUnit = async (organizationId, userId, productId, unitId, data) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.inventory.update');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to update products');
+  }
+
+  const product = await productDb.findProductById(productId, organizationId);
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  const unit = await productDb.findUnitById(unitId, productId);
+  if (!unit) {
+    throw new Error('Unit not found');
+  }
+
+  const updated = await productDb.updateProductUnit(unitId, {
+    barcode: data.barcode,
+    price: data.price,
+    allowFractional: data.allowFractional,
+    conversionQty: data.conversionQty,
+  });
+
+  return updated;
+};
+
+
 export default {
   createProduct,
   getProducts,
@@ -295,4 +414,7 @@ export default {
   getLowStockProducts,
   getBranchProducts,
   updateBranchProductStock,
+  getProductByBarcode,
+  searchProducts,
+  updateProductUnit
 };

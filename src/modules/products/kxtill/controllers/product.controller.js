@@ -2,6 +2,9 @@
 
 import productService from '../services/product.service.js';
 import productValidator from '../validators/product.validator.js';
+import orgDb from '../../../platform/organizations/db/org.db.js';
+import productDb from '../db/product.db.js';
+import authorizationService from '../../../platform/authorization/services/authorization.service.js';
 
 const createProduct = async (req, res) => {
   const validation = productValidator.validateCreateProduct(req.body);
@@ -106,6 +109,47 @@ const updateProduct = async (req, res) => {
       return res.status(403).json({ error: error.message });
     }
     console.error('Update product error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const updateProductUnit = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, productId, unitId } = req.params;
+    const { barcode, price, allowFractional, conversionQty } = req.body;
+
+    const membership = await orgDb.findMembership(userId, organizationId);
+    if (!membership) {
+      return res.status(403).json({ error: 'You do not have access to this organization' });
+    }
+
+    const hasPermission = await authorizationService.checkPermission(
+      userId,
+      organizationId,
+      'kxtill.inventory.update'
+    );
+    if (!hasPermission) {
+      return res.status(403).json({ error: 'You do not have permission to update products' });
+    }
+
+    const unit = await productDb.updateProductUnit(unitId, {
+      barcode,
+      price,
+      allowFractional,
+      conversionQty,
+    });
+
+    res.status(200).json({ unit });
+  } catch (error) {
+    if (error.message === 'Unit not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Update product unit error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -254,7 +298,6 @@ const bulkCreateProducts = async (req, res) => {
     for (let i = 0; i < products.length; i++) {
       const productData = products[i];
       try {
-        // Validate required fields
         if (!productData.name) {
           errors.push({ index: i, error: 'Product name is required', data: productData });
           continue;
@@ -282,6 +325,72 @@ const bulkCreateProducts = async (req, res) => {
   }
 };
 
+const getProductByBarcode = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, barcode } = req.params;
+    const { branchId } = req.query;
+
+    const product = await productService.getProductByBarcode(
+      organizationId,
+      userId,
+      barcode,
+      branchId
+    );
+
+    res.status(200).json({ product });
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'Product not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Get product by barcode error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const searchProducts = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const { q, branchId, limit = 20 } = req.query;
+
+    if (!q || q.trim().length === 0) {
+      return res.status(400).json({ error: 'Search term is required' });
+    }
+
+    if (!branchId) {
+      return res.status(400).json({ error: 'Branch ID is required' });
+    }
+
+    const products = await productService.searchProducts(
+      organizationId,
+      userId,
+      q,
+      branchId,
+      parseInt(limit)
+    );
+
+    res.status(200).json({ items: products });
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Search products error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   createProduct,
   getProducts,
@@ -291,5 +400,8 @@ export default {
   getLowStockProducts,
   getBranchProducts,
   updateBranchProductStock,
-  bulkCreateProducts
+  bulkCreateProducts,
+  getProductByBarcode,
+  searchProducts,
+  updateProductUnit,
 };
