@@ -65,7 +65,7 @@ const buildEmailShell = ({ accent = COLORS.accent, eyebrow, title, bodyHtml, pre
         </div>
         <div class="footer">
           <p style="margin:0 0 6px; font-weight:bold; color:${COLORS.ink};">&mdash; The KXBYTE Team</p>
-          <p style="margin:0;">Need help? <a href="mailto:support@kxbyte.com">support@kxbyte.com</a></p>
+          <p style="margin:0;">Need help? <a href="mailto:support@kxbyte.co.ke">support@kxbyte.co.ke</a></p>
         </div>
       </div>
     </div>
@@ -76,11 +76,11 @@ const buildEmailShell = ({ accent = COLORS.accent, eyebrow, title, bodyHtml, pre
 const sendEmail = async ({ to, from, subject, html, replyTo }) => {
   try {
     const { data, error } = await resend.emails.send({
-      from: from ||'KXBYTE <vinnykylex@gmail.com>',
+      from: from || 'KXBYTE <no-reply@kxbyte.co.ke>',
       to: Array.isArray(to) ? to : [to],
       subject,
       html,
-      replyTo: replyTo || 'support@kxbyte.com',
+      replyTo: replyTo || 'support@kxbyte.co.ke',
     });
 
     if (error) throw error;
@@ -119,9 +119,9 @@ export const sendVerificationEmail = async (email, token, firstName) => {
   });
 
   if (result.success) {
-    console.log(`✅ Verification email sent to: ${email}`);
+    console.log(`Verification email sent to: ${email}`);
   } else {
-    console.log(`📧 Verification link (email failed): ${verificationUrl}`);
+    console.log(`Verification link (email failed): ${verificationUrl}`);
   }
 
   return result;
@@ -155,9 +155,9 @@ export const sendPasswordResetEmail = async (email, token, firstName) => {
   });
 
   if (result.success) {
-    console.log(`✅ Password reset email sent to: ${email}`);
+    console.log(`Password reset email sent to: ${email}`);
   } else {
-    console.log(`📧 Password reset link (email failed): ${resetUrl}`);
+    console.log(`Password reset link (email failed): ${resetUrl}`);
   }
 
   return result;
@@ -213,9 +213,9 @@ export const sendInvitationEmail = async (email, token, organizationName, invite
   });
 
   if (result.success) {
-    console.log(`✅ Invitation email sent to: ${email}`);
+    console.log(`Invitation email sent to: ${email}`);
   } else {
-    console.log(`📧 Invitation link (email failed): ${inviteUrl}`);
+    console.log(`Invitation link (email failed): ${inviteUrl}`);
   }
 
   return result;
@@ -248,13 +248,12 @@ export const sendNotificationEmail = async (email, title, message, metadata = {}
   });
 
   if (result.success) {
-    console.log(`✅ Notification email sent to: ${email}`);
+    console.log(`Notification email sent to: ${email}`);
   } else {
-    console.log(`📧 Notification email failed: ${email}`);
+    console.log(`Notification email failed: ${email}`);
   }
 
   return result;
 };
-
 
 export default sendEmail;

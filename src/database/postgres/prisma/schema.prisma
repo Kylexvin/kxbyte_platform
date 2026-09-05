@@ -18,6 +18,7 @@ model User {
   lastLoginAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
 
   ownedOrganizations Organization[] @relation("OrganizationOwner")
   memberships        Membership[]
@@ -796,8 +797,6 @@ model KxTillSalePayment {
   @@index([method])
   @@map("kxtill_sale_payments")
 }
-
-
 
 // ============================================================
 // KXTILL - STORE SETTINGS

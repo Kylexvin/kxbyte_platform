@@ -2,6 +2,10 @@
 
 import prisma from '../../../../database/postgres/prisma.js';
 
+// ============================================================
+// ORGANIZATION OPERATIONS
+// ============================================================
+
 const createOrganization = async (data) => {
   return prisma.organization.create({ data });
 };
@@ -50,7 +54,7 @@ const findOrganizationsByUserId = async (userId) => {
         },
       },
       isActive: true,
-      isArchived: false, // ✅ Exclude archived orgs
+      isArchived: false,
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -87,6 +91,10 @@ const findArchivedOrganizationsByUserId = async (userId) => {
   });
 };
 
+// ============================================================
+// MEMBERSHIP OPERATIONS
+// ============================================================
+
 const createMembership = async (data) => {
   return prisma.membership.create({ data });
 };
@@ -97,6 +105,30 @@ const findMembership = async (userId, organizationId) => {
       userId_organizationId: {
         userId,
         organizationId,
+      },
+    },
+  });
+};
+
+const findActiveMembershipWithOrg = async (userId, organizationId) => {
+  return prisma.membership.findFirst({
+    where: {
+      userId,
+      organizationId,
+      isActive: true,
+      deletedAt: null,
+    },
+    include: {
+      organization: {
+        where: {
+          isActive: true,
+          isArchived: false,
+        },
+      },
+      role: {
+        include: {
+          permissions: true,
+        },
       },
     },
   });
@@ -127,9 +159,20 @@ const findMembershipsByUser = async (userId) => {
   });
 };
 
+const updateMembership = async (id, data) => {
+  return prisma.membership.update({
+    where: { id },
+    data,
+  });
+};
+
 const deleteMembership = async (id) => {
   return prisma.membership.delete({ where: { id } });
 };
+
+// ============================================================
+// USER LOOKUP
+// ============================================================
 
 const findUserById = async (id) => {
   return prisma.user.findUnique({
@@ -155,15 +198,79 @@ const findUserByEmail = async (email) => {
   });
 };
 
+// ============================================================
+// BRANCH OPERATIONS
+// ============================================================
 
-const updateMembership = async (id, data) => {
-  return prisma.membership.update({
-    where: { id },
-    data,
+const findActiveBranch = async (branchId, organizationId) => {
+  return prisma.branch.findFirst({
+    where: {
+      id: branchId,
+      organizationId,
+      isActive: true,
+      deletedAt: null,
+    },
   });
 };
 
+const findBranchAccess = async (userId, branchId) => {
+  return prisma.branchAccess.findFirst({
+    where: {
+      userId,
+      branchId,
+      isActive: true,
+    },
+  });
+};
+
+// ============================================================
+// PERMISSION OPERATIONS
+// ============================================================
+
+const hasPermission = async (userId, organizationId, permission) => {
+  const membership = await prisma.membership.findFirst({
+    where: {
+      userId,
+      organizationId,
+      isActive: true,
+    },
+    include: {
+      role: {
+        include: {
+          permissions: true,
+        },
+      },
+    },
+  });
+
+  if (!membership) return false;
+
+  if (membership.role?.name === 'OWNER') return true;
+
+  return membership.role?.permissions?.some((p) => p.name === permission) || false;
+};
+
+const getUserRole = async (userId, organizationId) => {
+  const membership = await prisma.membership.findFirst({
+    where: {
+      userId,
+      organizationId,
+      isActive: true,
+    },
+    include: {
+      role: true,
+    },
+  });
+
+  return membership?.role?.name || null;
+};
+
+// ============================================================
+// EXPORTS
+// ============================================================
+
 export default {
+  // Organization
   createOrganization,
   findOrganizationById,
   findOrganizationBySlug,
@@ -171,13 +278,26 @@ export default {
   updateOrganization,
   archiveOrganization,
   restoreOrganization,
+  findArchivedOrganizationsByUserId,
+
+  // Membership
   createMembership,
   findMembership,
+  findActiveMembershipWithOrg,
   findMembershipsByOrganization,
   findMembershipsByUser,
+  updateMembership,
   deleteMembership,
+
+  // User
   findUserById,
   findUserByEmail,
-  updateMembership,
-  findArchivedOrganizationsByUserId,
+
+  // Branch
+  findActiveBranch,
+  findBranchAccess,
+
+  // Permission
+  hasPermission,
+  getUserRole,
 };
