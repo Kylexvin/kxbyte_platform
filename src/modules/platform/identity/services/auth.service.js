@@ -44,8 +44,9 @@ const register = async (data) => {
   const existingUser = await authDb.findUserByEmail(normalizedEmail);
 
   if (existingUser) {
-    // Generic error to prevent email enumeration
-    throw new Error('Registration failed');
+    const err = new Error('Email already registered');
+    err.code = 'EMAIL_EXISTS';
+    throw err;
   }
 
   const hashedPassword = await password.hashPassword(plainPassword);

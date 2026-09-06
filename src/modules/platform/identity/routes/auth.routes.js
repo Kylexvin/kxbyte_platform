@@ -6,6 +6,7 @@ import authMiddleware from '../middleware/auth.middleware.js';
 import dashboardController from '../controllers/dashboard.controller.js';
 import socialController from '../controllers/social.controller.js';
 import passport from '../config/passport.config.js';
+import oauthController from '../controllers/oauth.controller.js';
 import {
   loginLimiter,
   registerLimiter,
@@ -16,7 +17,26 @@ import {
 
 const router = express.Router();
 
-// Standard auth with rate limiting
+// ============================================================
+// OAUTH ROUTES
+// ============================================================
+
+router.get('/oauth/authorize', oauthController.authorize);
+router.post('/oauth/login', oauthController.oauthLogin);
+router.post('/oauth/token', oauthController.token);
+router.post('/oauth/revoke', oauthController.revoke);
+
+// ============================================================
+// PAGE RENDERERS (HTML) - Using oauthController
+// ============================================================
+
+router.get('/forgot-password', oauthController.forgotPasswordPage);
+router.get('/register', oauthController.registerPage);
+
+// ============================================================
+// STANDARD AUTH (API)
+// ============================================================
+
 router.post('/register', registerLimiter, authController.register);
 router.post('/login', loginLimiter, authController.login);
 router.post('/refresh', authController.refresh);
@@ -25,7 +45,10 @@ router.post('/forgot-password', passwordResetLimiter, authController.forgotPassw
 router.post('/reset-password', authController.resetPassword);
 router.get('/verify-email', authController.verifyEmail);
 
-// Protected routes with session limiting
+// ============================================================
+// PROTECTED ROUTES
+// ============================================================
+
 router.get('/me', authMiddleware.authenticate, authController.getMe);
 router.get('/me/dashboard', authMiddleware.authenticate, dashboardController.getDashboardContext);
 router.patch('/me', authMiddleware.authenticate, authController.updateProfile);
@@ -34,7 +57,10 @@ router.get('/sessions', authMiddleware.authenticate, sessionLimiter, authControl
 router.delete('/sessions/:sessionId', authMiddleware.authenticate, sessionLimiter, authController.revokeSession);
 router.post('/logout-all', authMiddleware.authenticate, authController.logoutAllDevices);
 
-// Social auth with rate limiting
+// ============================================================
+// SOCIAL AUTH
+// ============================================================
+
 router.get('/google', socialAuthLimiter, socialController.googleAuth);
 router.get('/github', socialAuthLimiter, socialController.githubAuth);
 
@@ -56,7 +82,10 @@ router.get(
   socialController.socialCallback
 );
 
-// Social account management
+// ============================================================
+// SOCIAL ACCOUNT MANAGEMENT
+// ============================================================
+
 router.get('/social/accounts', authMiddleware.authenticate, socialController.getSocialAccounts);
 router.post('/social/link', authMiddleware.authenticate, socialController.linkSocialAccount);
 router.delete('/social/:provider', authMiddleware.authenticate, socialController.unlinkSocialAccount);

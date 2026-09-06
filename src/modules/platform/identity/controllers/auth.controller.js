@@ -3,24 +3,47 @@
 import authService from '../services/auth.service.js';
 import authValidator from '../validators/auth.validator.js';
 
+const AUTH_BASE_URL = process.env.AUTH_BASE_URL || 'http://localhost:5000';
+
 const register = async (req, res) => {
   const validation = authValidator.validateRegister(req.body);
+  const { client_id, redirect_uri, state } = req.body;
+  const isBrowserFlow = Boolean(client_id && redirect_uri);
+
   if (!validation.valid) {
+    if (isBrowserFlow) {
+      return res.redirect(
+        `${AUTH_BASE_URL}/api/v1/auth/register?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=registration_failed`
+      );
+    }
     return res.status(400).json({ errors: validation.errors });
   }
 
   try {
     const result = await authService.register(req.body);
-    res.status(201).json(result);
+
+    if (isBrowserFlow) {
+      return res.redirect(
+        `${AUTH_BASE_URL}/api/v1/auth/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&registered=true`
+      );
+    }
+    return res.status(201).json(result);
   } catch (error) {
-    console.error('Registration error:', error);  
-    if (error.message === 'Email already registered') {
+    console.error('Registration error:', error);
+
+    if (isBrowserFlow) {
+      const errorCode = error.code === 'EMAIL_EXISTS' ? 'email_exists' : 'registration_failed';
+      return res.redirect(
+        `${AUTH_BASE_URL}/api/v1/auth/register?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=${errorCode}`
+      );
+    }
+
+    if (error.code === 'EMAIL_EXISTS') {
       return res.status(409).json({ error: error.message });
     }
-    res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error' });
   }
 };
-
 
 const login = async (req, res) => {
   const validation = authValidator.validateLogin(req.body);
@@ -30,7 +53,7 @@ const login = async (req, res) => {
 
   try {
     const { email, password } = req.body;
-    const result = await authService.login(email, password, req); // ← pass req
+    const result = await authService.login(email, password, req);
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'Invalid credentials') {
@@ -127,16 +150,35 @@ const updateProfile = async (req, res) => {
 
 const forgotPassword = async (req, res) => {
   const validation = authValidator.validateForgotPassword(req.body);
+  const { email, client_id, redirect_uri, state } = req.body;
+  const isBrowserFlow = Boolean(client_id && redirect_uri);
+
   if (!validation.valid) {
+    if (isBrowserFlow) {
+      return res.redirect(
+        `${AUTH_BASE_URL}/api/v1/auth/forgot-password?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=registration_failed`
+      );
+    }
     return res.status(400).json({ errors: validation.errors });
   }
 
   try {
-    const { email } = req.body;
     const result = await authService.forgotPassword(email);
-    res.status(200).json(result);
+
+    if (isBrowserFlow) {
+      return res.redirect(
+        `${AUTH_BASE_URL}/api/v1/auth/forgot-password?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&success=email_sent`
+      );
+    }
+    return res.status(200).json(result);
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    // Always report success in the browser flow — don't leak whether the email exists
+    if (isBrowserFlow) {
+      return res.redirect(
+        `${AUTH_BASE_URL}/api/v1/auth/forgot-password?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&success=email_sent`
+      );
+    }
+    return res.status(500).json({ error: 'Internal server error' });
   }
 };
 

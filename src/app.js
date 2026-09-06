@@ -50,40 +50,94 @@ for (const envVar of REQUIRED_ENV_VARS) {
 const app = express();
 
 // ============================================================
-// CORS CONFIGURATION
+// FORCE CORS — MUST BE FIRST (BEFORE ANY OTHER MIDDLEWARE)
 // ============================================================
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
-  : ['http://localhost:3000', 'http://localhost:5173'];
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Set CORS headers for ALL requests
+  res.setHeader('Access-Control-Allow-Origin', origin || 'http://localhost:3000');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Total-Count, X-Page');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  
+  // Handle preflight OPTIONS request
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  
+  next();
+});
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, server-to-server)
-    if (!origin) {
-      return callback(null, true);
-    }
+// ============================================================
+// ENVIRONMENT VARIABLES FOR CSP
+// ============================================================
 
-    if (allowedOrigins.includes(origin) || process.env.NODE_ENV === 'development') {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS: Origin ${origin} not allowed`));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  exposedHeaders: ['Content-Length', 'X-Total-Count', 'X-Page'],
-  maxAge: 86400,
-};
+const AUTH_ORIGIN = process.env.AUTH_BASE_URL || 'http://localhost:5000';
+const FRONTEND_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-app.use(cors(corsOptions));
+// ============================================================
+// CUSTOM CSP MIDDLEWARE (BEFORE HELMET)
+// ============================================================
+
+app.use((req, res, next) => {
+  // Server-rendered auth UI pages (login, register, forgot-password, etc.)
+  // need inline style/script support — API/JSON routes don't.
+  const isAuthUIPage =
+    req.path.startsWith('/api/v1/auth/oauth') ||
+    req.path === '/api/v1/auth/register' ||
+    req.path === '/api/v1/auth/forgot-password';
+
+  if (isAuthUIPage) {
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "img-src 'self' data: https://res.cloudinary.com https://*.cloudinary.com",
+        `form-action 'self' ${AUTH_ORIGIN} ${FRONTEND_ORIGIN}`,
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        `connect-src 'self' ${AUTH_ORIGIN} ${FRONTEND_ORIGIN}`,
+        "frame-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'"
+      ].join('; ')
+    );
+  } else {
+    // Default CSP for all other routes
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "img-src 'self' data: https://res.cloudinary.com https://*.cloudinary.com",
+        "form-action 'self'",
+        "script-src 'self'",
+        "style-src 'self'",
+        `connect-src 'self' ${AUTH_ORIGIN}`,
+        "frame-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'"
+      ].join('; ')
+    );
+  }
+  next();
+});
 
 // ============================================================
 // STANDARD MIDDLEWARE
 // ============================================================
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "unsafe-none" },  // ADD THIS LINE
+    contentSecurityPolicy: false,
+  })
+);
+
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -173,7 +227,6 @@ export async function initializeProducts() {
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
 
-  // Hide stack traces in production
   const response = {
     success: false,
     message: err.message || 'Internal server error',

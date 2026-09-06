@@ -18,13 +18,13 @@ const createSubscriptionForProduct = async (organizationId, productKey) => {
         productKey,
         defaultPlan.key
       );
-      console.log(`✅ Subscription created for ${productKey} (${defaultPlan.name})`);
+      console.log(`Subscription created for ${productKey} (${defaultPlan.name})`);
     } else {
-      console.log(`⚠️ No plans found for ${productKey}, subscription not created`);
+      console.log(`No plans found for ${productKey}, subscription not created`);
     }
   } catch (error) {
     if (error.message === 'Subscription already exists for this product') {
-      console.log(`ℹ️ Subscription already exists for ${productKey}`);
+      console.log(`Subscription already exists for ${productKey}`);
     } else {
       console.error(`Failed to create subscription for ${productKey}:`, error.message);
     }
@@ -40,18 +40,14 @@ const reactivateSubscription = async (organizationId, productKey) => {
       return;
     }
 
-    // ✅ Only reactivate if cancelled or expired
     if (subscription.status === 'CANCELLED' || subscription.status === 'EXPIRED') {
-      // ✅ Keep existing dates, just change status
       await subscriptionDb.updateSubscription(subscription.id, {
         status: 'ACTIVE',
         cancelledAt: null,
         expiredAt: null,
-        // ✅ DO NOT reset currentPeriodStart/currentPeriodEnd
-        // ✅ DO NOT reset trialStart/trialEnd
       });
       
-      console.log(`✅ Subscription reactivated for ${productKey}`);
+      console.log(`Subscription reactivated for ${productKey}`);
     }
   } catch (error) {
     console.error(`Failed to reactivate subscription for ${productKey}:`, error.message);
@@ -93,26 +89,36 @@ const activateProduct = async (organizationId, userId, productKey) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
-  }
-
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can activate products');
-  }
+  } 
 
   const product = await productDb.findProductByKey(productKey);
   if (!product) {
     throw new Error('Product not found');
   }
 
+  // Check if already activated - skip owner check if active
   const existing = await productDb.findOrganizationProduct(organizationId, product.id);
+  
+  if (existing && existing.isActive) {
+    // Already active - return existing for any user
+    return {
+      organizationId,
+      productKey: product.key,
+      productName: product.name,
+      activatedAt: existing.activatedAt,
+      isActive: true,
+    };
+  }
+
+  // Only owner can activate if not already active
+  if (organization.ownerId !== userId) {
+    throw new Error('Only the organization owner can activate products');
+  }
 
   let result;
 
   if (existing) {
-    if (existing.isActive) {
-      throw new Error('Product is already activated for this organization');
-    }
-    // Reactivate
+    // Reactivate (existing but inactive)
     await productDb.updateOrganizationProduct(organizationId, product.id, { isActive: true });
     await reactivateSubscription(organizationId, productKey);
 
@@ -159,7 +165,6 @@ const activateProduct = async (organizationId, userId, productKey) => {
   return result;
 };
 
-
 const deactivateProduct = async (organizationId, userId, productKey) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -180,20 +185,17 @@ const deactivateProduct = async (organizationId, userId, productKey) => {
     throw new Error('Product is not activated for this organization');
   }
 
-  // ✅ Deactivate organization product
   await productDb.deactivateOrganizationProduct(organizationId, product.id);
 
-  // ✅ ALSO cancel the subscription
   const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
   if (subscription && subscription.status !== 'CANCELLED') {
     await subscriptionDb.updateSubscription(subscription.id, {
       status: 'CANCELLED',
       cancelledAt: new Date(),
     });
-    console.log(`✅ Subscription cancelled for ${productKey}`);
+    console.log(`Subscription cancelled for ${productKey}`);
   }
 
-  // Audit log
   await audit.log({
     organizationId: organization.id,
     userId: userId,
