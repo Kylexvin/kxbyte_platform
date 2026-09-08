@@ -14,6 +14,7 @@ const ALLOWED_REDIRECTS = {
   kxsuite: process.env.KXSUITE_REDIRECT_URI || 'http://localhost:3000/dashboard/oauth/callback',
 };
 
+
 const KXBYTE_LOGO_URL = 'https://res.cloudinary.com/dkahrnjrn/image/upload/v1788695499/logo.png';
 const AUTH_BASE_URL = process.env.AUTH_BASE_URL || 'http://localhost:5000';
 
