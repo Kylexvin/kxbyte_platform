@@ -25,11 +25,13 @@ router.post('/products/bulk', productController.bulkCreateProducts);
 router.get('/products/search', productController.searchProducts);
 router.get('/products/barcode/:barcode', productController.getProductByBarcode);
 
+
 // Dynamic routes LAST (with :param)
 router.patch('/products/:productId/units/:unitId', productController.updateProductUnit);
 router.get('/products/:productId', productController.getProduct);
 router.patch('/products/:productId', productController.updateProduct);
 router.delete('/products/:productId', productController.deleteProduct);
+router.patch('/branches/:branchId/products/:productId', productController.updateBranchProduct);
 
 // ============================================================
 // BRANCH PRODUCT ROUTES (Branch-level inventory)
@@ -46,6 +48,7 @@ router.get('/sales', saleController.getSales);
 router.get('/sales/:saleId', saleController.getSale);
 router.post('/sales/:saleId/refund', saleController.refundSale);
 router.get('/sales/:saleId/receipt', receiptController.generateReceipt);
+
 // ============================================================
 // SYNC ROUTES (Offline-first)
 // ============================================================
@@ -115,7 +118,10 @@ router.get('/inventory/health', reportController.getInventoryHealth);
 router.get('/inventory/needs-attention', reportController.getNeedsAttention);
 router.get('/inventory/activity', reportController.getStockActivity);
 router.get('/inventory/branches', reportController.getBranchStock);
-
+router.get('/dashboard/profit', reportController.getProfit);
+router.get('/dashboard/today-stats', reportController.getTodayStats);
+router.get('/dashboard/sales-trend', reportController.getSalesTrend);
+router.get('/dashboard/today-sales-trend', reportController.getTodaySalesTrend);
 // ============================================================
 // EXPORTS ROUTES
 // ============================================================

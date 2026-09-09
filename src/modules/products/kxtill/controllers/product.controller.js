@@ -237,6 +237,40 @@ const getBranchProducts = async (req, res) => {
   }
 };
 
+const updateBranchProduct = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, branchId, productId } = req.params;
+    const { displayName, description, price, isAvailable } = req.body;
+
+    // Just call the service — it handles permissions
+    const result = await productService.updateBranchProduct(
+      organizationId,
+      userId,
+      branchId,
+      productId,
+      { displayName, description, price, isAvailable }
+    );
+
+    res.status(200).json({ branchProduct: result });
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization' ||
+        error.message === 'You do not have access to this branch' ||
+        error.message === 'You do not have permission to update products') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'Branch product not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Update branch product error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 const updateBranchProductStock = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -276,7 +310,7 @@ const updateBranchProductStock = async (req, res) => {
     console.error('Update branch product stock error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-};
+}; 
 
 const bulkCreateProducts = async (req, res) => {
   try {
@@ -478,5 +512,7 @@ export default {
   searchProducts,
   updateProductUnit,
   getProductsForSync,
-  getBranchProductsForSync
+  getBranchProductsForSync,
+  updateBranchProduct,
+
 };

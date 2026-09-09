@@ -76,13 +76,16 @@ const getSales = async (req, res) => {
     }
 
     const { organizationId } = req.params;
-    const { limit, offset, startDate, endDate, status } = req.query;
+    const { limit, offset, startDate, endDate, status, branchId, search } = req.query; // ← Add branchId, search
+    
     const sales = await saleService.getSales(organizationId, userId, {
       limit: limit ? parseInt(limit) : 50,
       offset: offset ? parseInt(offset) : 0,
       startDate,
       endDate,
       status,
+      branchId,  // ← Pass branchId
+      search,    // ← Pass search
     });
     res.status(200).json(sales);
   } catch (error) {

@@ -528,6 +528,7 @@ model KxTillProduct {
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+  cost           Decimal  @default(0)
 
   @@index([organizationId])
   @@index([sku])
@@ -611,6 +612,7 @@ model KxTillProductUnit {
   updatedAt        DateTime @updatedAt
   saleItems        KxTillSaleItem[]
   branchUnitPrices KxTillBranchProductUnitPrice[]
+  cost             Decimal?
 
   @@unique([productId, name])
   @@unique([productId, abbreviation])

@@ -34,7 +34,7 @@ const createProduct = async (userId, organizationId, data) => {
     throw new Error('You do not have permission to create products');
   }
 
-  // Create product
+  // ✅ Create product WITH cost
   const product = await productDb.createProduct({
     organizationId,
     name: data.name,
@@ -42,6 +42,7 @@ const createProduct = async (userId, organizationId, data) => {
     description: data.description,
     category: data.category,
     taxRate: 0,
+    cost: data.cost || 0,  // ← Add cost
     trackInventory: data.trackInventory !== undefined ? data.trackInventory : true,
   });
 
@@ -54,6 +55,7 @@ const createProduct = async (userId, organizationId, data) => {
       unitType: data.baseUnit.unitType || 'WHOLE',
       conversionQty: 1,
       price: data.baseUnit.price,
+      cost: data.baseUnit.cost || null,  // ← Add unit cost
       allowFractional: data.baseUnit.allowFractional || false,
       isBaseUnit: true,
     });
@@ -69,6 +71,7 @@ const createProduct = async (userId, organizationId, data) => {
         unitType: unit.unitType || 'PACKAGED',
         conversionQty: unit.conversionQty || 1,
         price: unit.price,
+        cost: unit.cost || null,  // ← Add unit cost
         allowFractional: unit.allowFractional || false,
         isBaseUnit: false,
       });
@@ -82,7 +85,7 @@ const createProduct = async (userId, organizationId, data) => {
     await productDb.updateProduct(product.id, organizationId, { baseUnitId });
   }
 
-  // ✅ Create branch products for all active branches
+  // Create branch products for all active branches
   const branches = await prisma.branch.findMany({
     where: { organizationId, isActive: true },
   });
@@ -296,9 +299,73 @@ const searchProducts = async (organizationId, userId, searchTerm, branchId, limi
 
 
 
+
 // ============================================================
 // BRANCH PRODUCTS
 // ============================================================
+
+const updateBranchProduct = async (organizationId, userId, branchId, productId, data) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.inventory.update');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to update products');
+  }
+
+  if (!membership.hasAllBranches) {
+    const hasBranchAccess = await prisma.branchAssignment.findUnique({
+      where: {
+        membershipId_branchId: {
+          membershipId: membership.id,
+          branchId,
+        },
+      },
+    });
+    if (!hasBranchAccess) {
+      throw new Error('You do not have access to this branch');
+    }
+  }
+
+  const branchProduct = await prisma.kxTillBranchProduct.findFirst({
+    where: {
+      productId,
+      branchId,
+      product: { organizationId },
+    },
+  });
+
+  if (!branchProduct) {
+    throw new Error('Branch product not found');
+  }
+
+  // ✅ Remove price from update
+  const updated = await prisma.kxTillBranchProduct.update({
+    where: { id: branchProduct.id },
+    data: {
+      displayName: data.displayName !== undefined ? data.displayName : branchProduct.displayName,
+      description: data.description !== undefined ? data.description : branchProduct.description,
+      isAvailable: data.isAvailable !== undefined ? data.isAvailable : branchProduct.isAvailable,
+    },
+  });
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'KXTILL_BRANCH_PRODUCT_UPDATED',
+    resource: 'branch_product',
+    resourceId: updated.id,
+    metadata: {
+      productId,
+      branchId,
+      updatedFields: Object.keys(data),
+    },
+  });
+
+  return updated;
+};
 
 const getBranchProducts = async (organizationId, userId, branchId, filters = {}) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -373,6 +440,8 @@ const updateBranchProductStock = async (organizationId, userId, branchId, produc
 
   return updated;
 };
+
+
 
 const updateProductUnit = async (organizationId, userId, productId, unitId, data) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -479,4 +548,5 @@ export default {
   updateProductUnit,
   getProductsForSync,
   getBranchProductsForSync,
+  updateBranchProduct,
 };

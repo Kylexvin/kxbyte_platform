@@ -201,11 +201,19 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
 };
 
 const updateSaleStatus = async (id, status, userId = null) => {
-  const data = { status };
+  const data = { 
+    status,
+    updatedAt: new Date(),
+  };
+  
   if (userId) {
-    data.updatedBy = userId;
-    data.updatedAt = new Date();
+    // use refundedBy (exists in schema) instead of updatedBy (doesn't exist)
+    if (status === 'REFUNDED') {
+      data.refundedBy = userId;
+      data.refundedAt = new Date();
+    }
   }
+  
   return prisma.kxTillSale.update({
     where: { id },
     data,

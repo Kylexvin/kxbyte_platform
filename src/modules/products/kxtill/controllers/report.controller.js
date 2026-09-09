@@ -30,6 +30,69 @@ const getDashboardSummary = async (req, res) => {
   }
 };
 
+const getTodayStats = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const { branchId } = req.query;
+
+    const result = await reportService.getTodayStats(organizationId, userId, branchId);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Get today stats error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getSalesTrend = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const { days = 7, branchId } = req.query;
+
+    const result = await reportService.getSalesTrend(organizationId, userId, parseInt(days), branchId);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Get sales trend error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const getTodaySalesTrend = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const { branchId } = req.query;
+
+    const result = await reportService.getTodaySalesTrend(organizationId, userId, branchId);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Get today sales trend error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 const getSalesChart = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -308,7 +371,26 @@ const getReturnsSummary = async (req, res) => {
   }
 };
 
-// Add these functions:
+const getProfit = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId } = req.params;
+    const { branchId, period = 'today' } = req.query;
+
+    const result = await reportService.getProfit(organizationId, userId, branchId, period);
+    res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Get profit error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
 
 const getInventorySummary = async (req, res) => {
   try {
@@ -413,5 +495,9 @@ export default {
   getInventoryHealth,     
   getNeedsAttention,      
   getStockActivity,       
-  getBranchStock,        
+  getBranchStock,   
+  getProfit,    
+  getTodayStats, 
+  getSalesTrend,
+  getTodaySalesTrend,
 };
