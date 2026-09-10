@@ -34,7 +34,7 @@ const createProduct = async (userId, organizationId, data) => {
     throw new Error('You do not have permission to create products');
   }
 
-  // ✅ Create product WITH cost
+  // Create product WITH cost
   const product = await productDb.createProduct({
     organizationId,
     name: data.name,
@@ -42,23 +42,25 @@ const createProduct = async (userId, organizationId, data) => {
     description: data.description,
     category: data.category,
     taxRate: 0,
-    cost: data.cost || 0,  // ← Add cost
+    cost: data.cost || 0,
     trackInventory: data.trackInventory !== undefined ? data.trackInventory : true,
   });
 
+  let baseUnitId = null;
+
   // Create base unit if provided
   if (data.baseUnit) {
-    await productDb.createProductUnit({
+    const baseUnit = await productDb.createProductUnit({
       productId: product.id,
       name: data.baseUnit.name,
       abbreviation: data.baseUnit.abbreviation,
       unitType: data.baseUnit.unitType || 'WHOLE',
       conversionQty: 1,
       price: data.baseUnit.price,
-      cost: data.baseUnit.cost || null,  // ← Add unit cost
+      cost: data.baseUnit.cost || null,
       allowFractional: data.baseUnit.allowFractional || false,
-      isBaseUnit: true,
     });
+    baseUnitId = baseUnit.id;
   }
 
   // Create selling units
@@ -71,16 +73,13 @@ const createProduct = async (userId, organizationId, data) => {
         unitType: unit.unitType || 'PACKAGED',
         conversionQty: unit.conversionQty || 1,
         price: unit.price,
-        cost: unit.cost || null,  // ← Add unit cost
+        cost: unit.cost || null,
         allowFractional: unit.allowFractional || false,
-        isBaseUnit: false,
       });
     }
   }
 
   // Set base unit reference
-  const units = await productDb.findUnitsByProduct(product.id);
-  const baseUnitId = units.find(u => u.isBaseUnit)?.id;
   if (baseUnitId) {
     await productDb.updateProduct(product.id, organizationId, { baseUnitId });
   }
@@ -154,7 +153,21 @@ const updateProduct = async (organizationId, userId, productId, data) => {
     throw new Error('You do not have permission to update products');
   }
 
-  const product = await productDb.updateProduct(productId, organizationId, data);
+  // ✅ Only allow valid product fields
+  const allowedFields = ['name', 'sku', 'description', 'category', 'taxRate', 'cost', 'trackInventory', 'isActive'];
+  const updateData = {};
+
+  for (const field of allowedFields) {
+    if (data[field] !== undefined) {
+      updateData[field] = data[field];
+    }
+  }
+
+  if (Object.keys(updateData).length === 0) {
+    throw new Error('No valid fields to update');
+  }
+
+  const product = await productDb.updateProduct(productId, organizationId, updateData);
 
   await audit.log({
     organizationId,
@@ -164,6 +177,7 @@ const updateProduct = async (organizationId, userId, productId, data) => {
     resourceId: product.id,
     metadata: {
       name: product.name,
+      updatedFields: Object.keys(updateData),
     },
   });
 

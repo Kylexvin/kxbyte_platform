@@ -605,14 +605,15 @@ model KxTillProductUnit {
   price            Decimal?
   allowFractional  Boolean  @default(false)
   barcode          String?
-  isBaseUnit       Boolean  @default(false)
-  baseForProduct   KxTillProduct? @relation("KxTillBaseUnit")
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   saleItems        KxTillSaleItem[]
   branchUnitPrices KxTillBranchProductUnitPrice[]
   cost             Decimal?
+
+  // ✅ Reverse relation for base unit (required by Prisma)
+  baseForProduct   KxTillProduct? @relation("KxTillBaseUnit")
 
   @@unique([productId, name])
   @@unique([productId, abbreviation])

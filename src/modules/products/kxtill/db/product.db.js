@@ -33,7 +33,7 @@ const findProductsByOrganization = async (organizationId, filters = {}) => {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
       { sku: { contains: search, mode: 'insensitive' } },
-      { barcode: { contains: search, mode: 'insensitive' } },
+      { units: { some: { barcode: { contains: search, mode: 'insensitive' } } } },
     ];
   }
   if (category) where.category = category;
@@ -287,9 +287,7 @@ const updateStock = async (branchProductId, quantity) => {
   });
 };
 
-
 const findProductByBarcode = async (barcode, organizationId, branchId) => {
-  // Search the units table for the barcode
   const unit = await prisma.kxTillProductUnit.findFirst({
     where: {
       barcode: barcode,
@@ -365,9 +363,9 @@ const findProductsForSync = async (organizationId, since, limit, offset, branchI
       units: true,
       baseUnit: true,
       branchProducts: {
-        where: { 
+        where: {
           isAvailable: true,
-          ...(branchId ? { branchId } : {})  // <-- FILTER BY BRANCH
+          ...(branchId ? { branchId } : {}),
         },
         include: {
           branch: true,
@@ -379,7 +377,6 @@ const findProductsForSync = async (organizationId, since, limit, offset, branchI
     take: limit,
   });
 
-  // Only include products that have branchProducts (i.e., available in this branch)
   const items = [];
   for (const product of products) {
     for (const bp of product.branchProducts) {
@@ -425,6 +422,5 @@ export default {
   updateStock,
   findProductByBarcode,
   findProductsForSync,
-  findBranchProductsForSync, 
-
+  findBranchProductsForSync,
 };

@@ -88,6 +88,24 @@ const permissions = [
   description: 'Export audit logs for the organization',
 },
 
+// ============================================================
+// TRANSFERS
+// ============================================================
+{
+  key: 'kxtill.inventory.transfers.create',
+  name: 'Create Transfers',
+  description: 'Create stock transfers between branches',
+},
+{
+  key: 'kxtill.inventory.transfers.approve',
+  name: 'Approve/Reject Transfers',
+  description: 'Approve or reject pending stock transfers',
+},
+{
+  key: 'kxtill.inventory.transfers.complete',
+  name: 'Complete Transfers',
+  description: 'Confirm receipt and complete stock transfers',
+},
   // ============================================================
   // SETTINGS
   // ============================================================

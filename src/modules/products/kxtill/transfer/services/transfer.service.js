@@ -5,14 +5,32 @@ import transferDb from '../db/transfer.db.js';
 import branchProductDb from '../../db/product.db.js';
 import orgDb from '../../../../platform/organizations/db/org.db.js';
 import audit from '../../../../platform/audit/index.js';
-import notifications from '../../../../platform/notifications/index.js';
+import authorizationService from '../../../../platform/authorization/services/authorization.service.js';
 import { v4 as uuidv4 } from 'uuid';
+
+// ============================================================
+// HELPER: Check permission (same pattern as product.service.js)
+// ============================================================
+
+const checkPermission = async (userId, organizationId, permissionKey) => {
+  return authorizationService.checkPermission(userId, organizationId, permissionKey);
+};
+
+// Platform-level fallback: users with branches.manage can also act on transfers.
+// Mirrors the frontend gate so no buttons are shown that would 403.
+const canManageTransfersViaPlatform = async (userId, organizationId) => {
+  return checkPermission(userId, organizationId, 'branches.manage');
+};
 
 const generateReference = () => {
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = Math.random().toString(36).substring(2, 6).toUpperCase();
   return `XF-${timestamp}-${random}`;
 };
+
+// ============================================================
+// CREATE
+// ============================================================
 
 const createTransfer = async (userId, organizationId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
@@ -25,13 +43,19 @@ const createTransfer = async (userId, organizationId, data) => {
     throw new Error('You do not have access to this organization');
   }
 
-  const permissions = await getPermissions(userId, organizationId);
-  const canCreate = permissions.includes('*') || permissions.includes('kxtill.inventory.transfers.create');
-  if (!canCreate) {
+  const hasKxtillPerm = await checkPermission(
+    userId,
+    organizationId,
+    'kxtill.inventory.transfers.create'
+  );
+  const hasPlatformPerm = hasKxtillPerm
+    ? true
+    : await canManageTransfersViaPlatform(userId, organizationId);
+
+  if (!hasKxtillPerm && !hasPlatformPerm) {
     throw new Error('You do not have permission to create transfers');
   }
 
-  // ✅ FIX: Remove organizationId from where clause
   const source = await prisma.kxTillBranchProduct.findFirst({
     where: {
       id: data.sourceBranchProductId,
@@ -52,7 +76,6 @@ const createTransfer = async (userId, organizationId, data) => {
 
   const destBranchId = data.destBranchId;
 
-  // ✅ FIX: Remove organizationId from where clause
   let dest = await prisma.kxTillBranchProduct.findFirst({
     where: {
       productId: source.productId,
@@ -115,6 +138,10 @@ const createTransfer = async (userId, organizationId, data) => {
   return transfer;
 };
 
+// ============================================================
+// READ
+// ============================================================
+
 const getTransfers = async (userId, organizationId, filters = {}) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
@@ -138,6 +165,10 @@ const getTransfer = async (userId, organizationId, transferId) => {
   return transfer;
 };
 
+// ============================================================
+// APPROVE
+// ============================================================
+
 const approveTransfer = async (userId, organizationId, transferId) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -149,9 +180,16 @@ const approveTransfer = async (userId, organizationId, transferId) => {
     throw new Error('You do not have access to this organization');
   }
 
-  const permissions = await getPermissions(userId, organizationId);
-  const canApprove = permissions.includes('*') || permissions.includes('kxtill.inventory.transfers.approve');
-  if (!canApprove) {
+  const hasKxtillPerm = await checkPermission(
+    userId,
+    organizationId,
+    'kxtill.inventory.transfers.approve'
+  );
+  const hasPlatformPerm = hasKxtillPerm
+    ? true
+    : await canManageTransfersViaPlatform(userId, organizationId);
+
+  if (!hasKxtillPerm && !hasPlatformPerm) {
     throw new Error('You do not have permission to approve transfers');
   }
 
@@ -191,10 +229,31 @@ const approveTransfer = async (userId, organizationId, transferId) => {
   return updated;
 };
 
+// ============================================================
+// COMPLETE
+// ============================================================
+
 const completeTransfer = async (userId, organizationId, transferId) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
+  }
+
+  const hasKxtillPerm = await checkPermission(
+    userId,
+    organizationId,
+    'kxtill.inventory.transfers.complete'
+  );
+  const hasApprovePerm = hasKxtillPerm
+    ? true
+    : await checkPermission(userId, organizationId, 'kxtill.inventory.transfers.approve');
+  const hasPlatformPerm =
+    hasKxtillPerm || hasApprovePerm
+      ? true
+      : await canManageTransfersViaPlatform(userId, organizationId);
+
+  if (!hasKxtillPerm && !hasApprovePerm && !hasPlatformPerm) {
+    throw new Error('You do not have permission to complete transfers');
   }
 
   const transfer = await transferDb.findTransferById(transferId, organizationId);
@@ -228,15 +287,26 @@ const completeTransfer = async (userId, organizationId, transferId) => {
   return updated;
 };
 
+// ============================================================
+// REJECT
+// ============================================================
+
 const rejectTransfer = async (userId, organizationId, transferId, reason) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
   }
 
-  const permissions = await getPermissions(userId, organizationId);
-  const canReject = permissions.includes('*') || permissions.includes('kxtill.inventory.transfers.reject');
-  if (!canReject) {
+  const hasKxtillPerm = await checkPermission(
+    userId,
+    organizationId,
+    'kxtill.inventory.transfers.approve'
+  );
+  const hasPlatformPerm = hasKxtillPerm
+    ? true
+    : await canManageTransfersViaPlatform(userId, organizationId);
+
+  if (!hasKxtillPerm && !hasPlatformPerm) {
     throw new Error('You do not have permission to reject transfers');
   }
 
@@ -271,6 +341,10 @@ const rejectTransfer = async (userId, organizationId, transferId, reason) => {
   return updated;
 };
 
+// ============================================================
+// STATS
+// ============================================================
+
 const getTransferStats = async (organizationId) => {
   const counts = await transferDb.countTransfersByStatus(organizationId);
   return {
@@ -283,16 +357,10 @@ const getTransferStats = async (organizationId) => {
   };
 };
 
-// Helper
-const getPermissions = async (userId, organizationId) => {
-  // TODO: Get permissions from authorization service
-  // For now, check if user is owner
-  const org = await orgDb.findOrganizationById(organizationId);
-  if (org.ownerId === userId) {
-    return ['*'];
-  }
-  return [];
-};
+// ============================================================
+// STOCK HELPER
+// ============================================================
+
 const updateStock = async (branchProductId, quantity) => {
   return prisma.kxTillBranchProduct.update({
     where: { id: branchProductId },

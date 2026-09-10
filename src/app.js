@@ -55,7 +55,7 @@ const app = express();
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  
+
   // Set CORS headers for ALL requests
   res.setHeader('Access-Control-Allow-Origin', origin || 'http://localhost:3000');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -63,12 +63,12 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, Cookie');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Total-Count, X-Page');
   res.setHeader('Access-Control-Max-Age', '86400');
-  
+
   // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
-  
+
   next();
 });
 
@@ -133,7 +133,7 @@ app.use((req, res, next) => {
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
-    crossOriginOpenerPolicy: { policy: "unsafe-none" },  // ADD THIS LINE
+    crossOriginOpenerPolicy: { policy: "unsafe-none" },
     contentSecurityPolicy: false,
   })
 );
@@ -141,7 +141,11 @@ app.use(
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(morgan('combined'));
+
+// Minimal Morgan — status + method + path only, skip CORS preflights
+app.use(morgan(':status :method :url', {
+  skip: (req) => req.method === 'OPTIONS',
+}));
 
 // ============================================================
 // SESSION & PASSPORT
