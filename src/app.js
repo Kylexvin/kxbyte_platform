@@ -23,6 +23,7 @@ import notifications from './modules/platform/notifications/index.js';
 import payment from './modules/platform/payment/index.js';
 import branches from './modules/platform/branches/index.js';
 import support from './modules/platform/support/index.js';
+import customers from './modules/platform/customers/index.js';
 
 // ============================================================
 // PRODUCTS
@@ -38,7 +39,7 @@ const REQUIRED_ENV_VARS = ['SESSION_SECRET'];
 
 for (const envVar of REQUIRED_ENV_VARS) {
   if (!process.env[envVar]) {
-    console.error(`❌ Missing required environment variable: ${envVar}`);
+    console.error(`Missing required environment variable: ${envVar}`);
     process.exit(1);
   }
 }
@@ -182,6 +183,7 @@ notifications.register(app);
 payment.register(app);
 branches.register(app);
 support.register(app);
+customers.register(app);
 
 // ============================================================
 // KXTILL ROUTE REGISTRATION

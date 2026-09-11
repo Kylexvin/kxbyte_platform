@@ -70,6 +70,7 @@ const findSaleById = async (id, organizationId) => {
         },
       },
       branch: true,
+      customer: true, // ✅ Add this
     },
   });
 };
@@ -85,7 +86,6 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
     search,
   } = filters;
   
-  // Build where clause - NO deletedAt
   const where = { 
     organizationId,
   };
@@ -104,7 +104,6 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
     where.status = status;
   }
   
-  // Search by reference or customer name
   if (search) {
     where.OR = [
       { reference: { contains: search, mode: 'insensitive' } },
@@ -157,6 +156,7 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
             code: true,
           },
         },
+        customer: true, // ✅ Add this
       },
       orderBy: { createdAt: 'desc' },
       skip: offset,
@@ -165,11 +165,12 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
     prisma.kxTillSale.count({ where }),
   ]);
 
-  // Map the response to include paymentMethod and itemsCount
   const mappedItems = items.map(sale => ({
     id: sale.id,
     reference: sale.reference,
-    customerName: sale.customerName || 'Walk-in Customer',
+    customerId: sale.customerId,
+    customerName: sale.customer?.name || sale.customerName || 'Walk-in Customer',
+    customer: sale.customer,
     branch: sale.branch,
     user: sale.user,
     subtotal: sale.subtotal,
@@ -178,13 +179,10 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
     totalAmount: sale.totalAmount,
     status: sale.status,
     paymentStatus: sale.paymentStatus,
-    // Get payment method from first payment
     paymentMethod: sale.payments && sale.payments.length > 0 
       ? sale.payments[0].method 
       : null,
-    // Count items
     itemsCount: sale.items?.length || 0,
-    // Keep the full relations for detail view
     items: sale.items,
     payments: sale.payments,
     refundedByUser: sale.refundedByUser,

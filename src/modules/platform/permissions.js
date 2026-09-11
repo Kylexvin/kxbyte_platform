@@ -70,6 +70,32 @@ const platformPermissions = [
     name: 'Create Support Tickets',
     description: 'Create support tickets',
   },
+
+// ============================================================
+// CUSTOMERS (Platform-level)
+// ============================================================
+{
+  key: 'customers.view',
+  name: 'View Customers',
+  description: 'View customer list and details',
+},
+{
+  key: 'customers.create',
+  name: 'Create Customers',
+  description: 'Add new customers',
+},
+{
+  key: 'customers.update',
+  name: 'Update Customers',
+  description: 'Modify customer information',
+},
+{
+  key: 'customers.delete',
+  name: 'Delete Customers',
+  description: 'Delete customers',
+},
+
 ];
+
 
 export default platformPermissions;

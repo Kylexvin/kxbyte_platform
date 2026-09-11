@@ -48,26 +48,26 @@ const permissions = [
   // ============================================================
   // CUSTOMERS
   // ============================================================
-  {
-    key: 'kxtill.customers.create',
-    name: 'Create Customers',
-    description: 'Add new customers',
-  },
-  {
-    key: 'kxtill.customers.view',
-    name: 'View Customers',
-    description: 'View customer list and details',
-  },
-  {
-    key: 'kxtill.customers.update',
-    name: 'Update Customers',
-    description: 'Modify customer information',
-  },
-  {
-    key: 'kxtill.customers.delete',
-    name: 'Delete Customers',
-    description: 'Delete customers',
-  },
+  // {
+  //   key: 'kxtill.customers.create',
+  //   name: 'Create Customers',
+  //   description: 'Add new customers',
+  // },
+  // {
+  //   key: 'kxtill.customers.view',
+  //   name: 'View Customers',
+  //   description: 'View customer list and details',
+  // },
+  // {
+  //   key: 'kxtill.customers.update',
+  //   name: 'Update Customers',
+  //   description: 'Modify customer information',
+  // },
+  // {
+  //   key: 'kxtill.customers.delete',
+  //   name: 'Delete Customers',
+  //   description: 'Delete customers',
+  // },
 
   // ============================================================
   // REPORTS

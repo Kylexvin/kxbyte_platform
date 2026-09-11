@@ -7,6 +7,7 @@ import branchDb from '../../../platform/branches/db/branch.db.js';
 import audit from '../../../platform/audit/index.js';
 import authorizationService from '../../../platform/authorization/services/authorization.service.js';
 import prisma from '../../../../database/postgres/prisma.js';
+
 const checkPermission = async (userId, organizationId, permissionKey) => {
   return authorizationService.checkPermission(userId, organizationId, permissionKey);
 };
@@ -35,6 +36,13 @@ const createSale = async (userId, organizationId, data) => {
   const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.create');
   if (!hasPermission) {
     throw new Error('You do not have permission to create sales');
+  }
+
+  // ✅ Validate customer if provided
+  let customer = null;
+  if (data.customerId) {
+    const customerService = await import('../../../platform/customers/index.js');
+    customer = await customerService.default.validateCustomer(data.customerId, organizationId);
   }
 
   let subtotal = 0;
@@ -105,14 +113,14 @@ const createSale = async (userId, organizationId, data) => {
 
   const totalAmount = subtotal + taxAmount;
 
-  // ✅ Generate reference
   const reference = generateReference();
 
   const sale = await saleDb.createSale({
     organizationId,
     userId,
     reference,
-    customerName: data.customerName || 'Walk-in',
+    customerId: customer?.id || null,
+    customerName: customer?.name || data.customerName || 'Walk-in',
     branchId: data.branchId,
     subtotal,
     taxAmount,
@@ -149,6 +157,8 @@ const createSale = async (userId, organizationId, data) => {
       total: totalAmount,
       items: saleItems.length,
       reference,
+      customerId: customer?.id || null,
+      customerName: customer?.name || 'Walk-in',
     },
   });
 
@@ -156,7 +166,15 @@ const createSale = async (userId, organizationId, data) => {
 };
 
 const createOfflineSale = async (userId, organizationId, data) => {
-  const { clientSaleId, branchId, customerName, items, paymentMethod, paymentReference } = data;
+  const {
+    clientSaleId,
+    branchId,
+    customerId,
+    customerName,
+    items,
+    paymentMethod,
+    paymentReference,
+  } = data;
 
   // Check if sale already exists (idempotency)
   if (clientSaleId) {
@@ -188,14 +206,19 @@ const createOfflineSale = async (userId, organizationId, data) => {
     throw new Error('You do not have permission to create sales');
   }
 
-  // ✅ Generate reference
+  // ✅ Validate customer if provided
+  let customer = null;
+  if (customerId) {
+    const customerService = await import('../../../platform/customers/index.js');
+    customer = await customerService.default.validateCustomer(customerId, organizationId);
+  }
+
   const reference = generateReference();
 
   let subtotal = 0;
   let taxAmount = 0;
   const saleItems = [];
 
-  // Process items
   for (const item of data.items) {
     const product = await productDb.findProductById(item.productId, organizationId);
     if (!product) {
@@ -217,7 +240,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     const baseQuantity = quantity * conversionQty;
     const unitPrice = Number(item.unitPrice || unit.price || product.price);
 
-    // Check stock
     if (product.trackInventory) {
       const stock = Number(branchProduct.stock);
       if (stock < baseQuantity) {
@@ -248,7 +270,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
       total: total + tax,
     });
 
-    // Deduct stock
     if (product.trackInventory) {
       await productDb.updateStock(branchProduct.id, -baseQuantity);
     }
@@ -256,14 +277,14 @@ const createOfflineSale = async (userId, organizationId, data) => {
 
   const totalAmount = subtotal + taxAmount;
 
-  // Create sale with reference
   const sale = await saleDb.createSale({
     organizationId,
     userId,
     branchId,
     clientSaleId: clientSaleId || null,
-    customerName: customerName || null,
-    reference: reference, // ✅ Now using generated reference
+    customerId: customer?.id || null,
+    customerName: customer?.name || customerName || null,
+    reference: reference,
     subtotal,
     taxAmount,
     discount: 0,
@@ -272,7 +293,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     paymentStatus: 'PAID',
   });
 
-  // Create sale items
   for (const item of saleItems) {
     await saleDb.createSaleItem({
       ...item,
@@ -280,7 +300,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     });
   }
 
-  // Create payment
   if (paymentMethod) {
     await saleDb.createSalePayment({
       saleId: sale.id,
@@ -290,7 +309,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     });
   }
 
-  // Audit log
   await audit.log({
     organizationId,
     userId,
@@ -302,6 +320,8 @@ const createOfflineSale = async (userId, organizationId, data) => {
       reference,
       total: totalAmount,
       items: saleItems.length,
+      customerId: customer?.id || null,
+      customerName: customer?.name || customerName || null,
     },
   });
 

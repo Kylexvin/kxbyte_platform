@@ -9,6 +9,7 @@ import receiptController from '../controllers/receipt.controller.js';
 import exportController from '../controllers/export.controller.js';
 import transferController from '../transfer/controllers/transfer.controller.js';
 import staffController from '../controllers/staff.controller.js';
+import customerController from '../controllers/customer.controller.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 
 const router = express.Router({ mergeParams: true });
@@ -76,6 +77,7 @@ router.get('/staff', staffController.getStaff);
 router.patch('/staff/:targetUserId', staffController.updateStaff);
 router.delete('/staff/:targetUserId', staffController.removeStaff);
 
+
 // ============================================================
 // SETTINGS
 // ============================================================
@@ -131,5 +133,18 @@ router.get('/reports/export/top-products', exportController.exportTopProducts);
 router.get('/reports/export/branches', exportController.exportBranchPerformance);
 router.get('/reports/export/tax', exportController.exportTax);
 router.get('/reports/export/audit', exportController.exportAudit);
+
+// ============================================================
+// CUSTOMER ROUTES
+// ============================================================
+
+router.get('/customers/sync', customerController.getCustomersForSync);
+router.post('/customers/sync', customerController.syncOfflineCustomers);
+router.get('/customers', customerController.getCustomers);
+router.post('/customers', customerController.createCustomer);
+router.patch('/customers/:customerId', customerController.updateCustomer);
+router.delete('/customers/:customerId', customerController.deleteCustomer);
+router.get('/customers/:customerId', customerController.getCustomer);
+router.get('/customers/:customerId/sales', customerController.getCustomerSales);
 
 export default router;

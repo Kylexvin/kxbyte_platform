@@ -108,6 +108,7 @@ model Organization {
   branches       Branch[]
   supportTickets SupportTicket[]
   kxtillTransfers KxTillTransfer[]
+  customers Customer[]
 
   @@index([ownerId])
   @@index([slug])
@@ -713,9 +714,12 @@ model KxTillSale {
   totalAmount    Decimal
   status         String   @default("COMPLETED")
   paymentStatus  String   @default("PAID")
+  customerId     String?
+  customer       Customer? @relation("CustomerSales", fields: [customerId], references: [id], onDelete: SetNull)
 
   items          KxTillSaleItem[]
   payments       KxTillSalePayment[]
+  
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -983,3 +987,42 @@ model SocialAccount {
   @@map("social_accounts")
 }
 
+// ============================================================
+// CUSTOMERS (Platform-level)
+// ============================================================
+
+model Customer {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name           String
+  customerType   String   @default("INDIVIDUAL") // INDIVIDUAL, BUSINESS
+
+  phone          String?
+  email          String?
+
+  taxNumber      String?
+  companyName    String?
+
+  address        String?
+  city           String?
+  country        String?
+
+  source         String? // WALK_IN, REFERRAL, FACEBOOK, WEBSITE, WHATSAPP
+  createdByProduct String? 
+
+  notes          String?
+  isActive       Boolean  @default(true)
+
+  kxtillSales KxTillSale[] @relation("CustomerSales")
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([phone])
+  @@index([email])
+  @@unique([organizationId, phone])
+  @@map("customers")
+}

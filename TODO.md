@@ -166,3 +166,20 @@ Optional enhancement:
 
 NOT urgent — current pause-on-hidden already saves ~80% of idle load.
 Ship this only if you observe real cost from overnight-open POS tabs.
+
+DB Split — To-Do
+Goal
+Break the monolithic src/db/sqlite.js into domain-focused modules so each area (products, customers, sales, cart, sync) is independently readable, testable, and threadbare-simple. No file should be more than ~200 lines.
+
+Target Structure
+text
+src/db/
+├── sqlite.js              # engine core: initDb, getDb, saveToStore, run, query, resetDb, transactions
+├── schema.js              # createTables + all CREATE TABLE / ALTER TABLE statements
+├── products.js            # upsertProduct, getAllProducts, getProduct, clearProducts, units, branchProducts
+├── customers.js           # upsertLocalCustomer, searchLocalCustomers, getUnsynced, upsertServerCustomer, markCustomerSynced, replaceCustomerIdInSales
+├── cart.js                # saveCart, getActiveCart, clearCart
+├── sales.js               # createLocalSale, getPendingSales, updateSaleStatus, receipts, formatters, counts, retry
+├── sync-queue.js          # enqueueSync, getPendingSyncItems, updateSyncItemStatus, markAllFailedForRetry
+├── sync-metadata.js       # getSyncMetadata, setSyncMetadata, getLast*Sync, setLast*Sync
+└── index.js    
