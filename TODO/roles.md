@@ -24,6 +24,7 @@ means injecting KxTill permissions into their existing role.
 Currently deactivates the entire org membership.
 Should strip only `kxtill.*` permissions from the member's role.
 
+
 **Fix:**
 ```js
 // In staff.service.js — removeKxTillAccess
