@@ -2,6 +2,10 @@
 
 import staffService from '../services/staff.service.js';
 
+// ============================================================
+// GET /organizations/:organizationId/kxtill/staff
+// Query: ?includeInactive=true (optional)
+// ============================================================
 const getStaff = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -10,7 +14,14 @@ const getStaff = async (req, res) => {
     }
 
     const { organizationId } = req.params;
-    const result = await staffService.getKxTillStaff(organizationId, userId);
+    const includeInactive = req.query.includeInactive === 'true';
+
+    const result = await staffService.getKxTillStaff(
+      organizationId,
+      userId,
+      { includeInactive }
+    );
+
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'You do not have access to this organization') {
@@ -37,6 +48,9 @@ const updateStaff = async (req, res) => {
     );
     res.status(200).json(result);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     if (error.message === 'Organization not found') {
       return res.status(404).json({ error: error.message });
     }
@@ -66,6 +80,9 @@ const removeStaff = async (req, res) => {
     );
     res.status(200).json(result);
   } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
     if (error.message === 'Organization not found') {
       return res.status(404).json({ error: error.message });
     }

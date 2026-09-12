@@ -20,7 +20,6 @@ const permissions = [
     description: 'Refund sales transactions',
   },
 
-
   // ============================================================
   // INVENTORY
   // ============================================================
@@ -46,28 +45,23 @@ const permissions = [
   },
 
   // ============================================================
-  // CUSTOMERS
+  // TRANSFERS
   // ============================================================
-  // {
-  //   key: 'kxtill.customers.create',
-  //   name: 'Create Customers',
-  //   description: 'Add new customers',
-  // },
-  // {
-  //   key: 'kxtill.customers.view',
-  //   name: 'View Customers',
-  //   description: 'View customer list and details',
-  // },
-  // {
-  //   key: 'kxtill.customers.update',
-  //   name: 'Update Customers',
-  //   description: 'Modify customer information',
-  // },
-  // {
-  //   key: 'kxtill.customers.delete',
-  //   name: 'Delete Customers',
-  //   description: 'Delete customers',
-  // },
+  {
+    key: 'kxtill.inventory.transfers.create',
+    name: 'Create Transfers',
+    description: 'Create stock transfers between branches',
+  },
+  {
+    key: 'kxtill.inventory.transfers.approve',
+    name: 'Approve/Reject Transfers',
+    description: 'Approve or reject pending stock transfers',
+  },
+  {
+    key: 'kxtill.inventory.transfers.complete',
+    name: 'Complete Transfers',
+    description: 'Confirm receipt and complete stock transfers',
+  },
 
   // ============================================================
   // REPORTS
@@ -82,30 +76,7 @@ const permissions = [
     name: 'Export Reports',
     description: 'Export KxTill reports',
   },
-  {
-  key: 'audit.logs.export',
-  name: 'Export Audit Logs',
-  description: 'Export audit logs for the organization',
-},
 
-// ============================================================
-// TRANSFERS
-// ============================================================
-{
-  key: 'kxtill.inventory.transfers.create',
-  name: 'Create Transfers',
-  description: 'Create stock transfers between branches',
-},
-{
-  key: 'kxtill.inventory.transfers.approve',
-  name: 'Approve/Reject Transfers',
-  description: 'Approve or reject pending stock transfers',
-},
-{
-  key: 'kxtill.inventory.transfers.complete',
-  name: 'Complete Transfers',
-  description: 'Confirm receipt and complete stock transfers',
-},
   // ============================================================
   // SETTINGS
   // ============================================================
@@ -119,8 +90,6 @@ const permissions = [
     name: 'Update Settings',
     description: 'Modify KxTill settings',
   },
-
-  
 ];
 
 export default permissions;
