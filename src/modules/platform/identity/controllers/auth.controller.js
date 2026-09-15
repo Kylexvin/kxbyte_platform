@@ -291,4 +291,5 @@ export default {
   getSessions,
   logoutAllDevices,
   revokeSession,
+  
 };

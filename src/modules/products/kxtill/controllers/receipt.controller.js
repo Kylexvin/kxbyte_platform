@@ -1,27 +1,26 @@
 // src/modules/products/kxtill/controllers/receipt.controller.js
-
 import receiptService from '../services/receipt.service.js';
 
-const generateReceipt = async (req, res) => {
+/**
+ * GET /organizations/:organizationId/kxtill/sales/:saleId/receipt
+ *
+ * Returns structured receipt data.
+ * The frontend renders the receipt text using its own template engine.
+ */
+export const generateReceipt = async (req, res, next) => {
   try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
     const { organizationId, saleId } = req.params;
+    const data = await receiptService.getReceiptData(organizationId, saleId);
+    res.json(data);
+  } catch (err) {
+    console.error('Generate receipt error:', err);
 
-    const receipt = await receiptService.generateReceipt(organizationId, saleId);
-    res.status(200).json(receipt);
-  } catch (error) {
-    if (error.message === 'Sale not found') {
-      return res.status(404).json({ error: error.message });
+    if (err.message === 'Sale not found') {
+      return res.status(404).json({ error: 'Sale not found' });
     }
-    console.error('Generate receipt error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+
+    next(err);
   }
 };
 
-export default {
-  generateReceipt,
-};
+export default { generateReceipt };

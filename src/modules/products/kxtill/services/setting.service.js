@@ -47,6 +47,9 @@ const getSettings = async (organizationId, userId) => {
 
     // Branch
     allowBranchSwitch: settings?.allowBranchSwitch ?? true,
+
+    // Receipt Template
+    receiptTemplate: settings?.receiptTemplate || 'classic',
   };
 };
 

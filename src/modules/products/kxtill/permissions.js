@@ -43,6 +43,11 @@ const permissions = [
     name: 'Delete Inventory',
     description: 'Delete inventory items',
   },
+  {
+    key: 'kxtill.inventory.global.view',
+    name: 'View Global Inventory',
+    description: 'View organization-wide inventory across all branches',
+  },
 
   // ============================================================
   // TRANSFERS

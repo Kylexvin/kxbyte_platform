@@ -44,6 +44,20 @@ const getProducts = async (req, res) => {
     }
 
     const { organizationId } = req.params;
+
+    // Global inventory requires the dedicated permission — it exposes
+    // cross-branch stock aggregates.
+    const hasGlobal = await authorizationService.checkPermission(
+      userId,
+      organizationId,
+      'kxtill.inventory.global.view'
+    );
+    if (!hasGlobal) {
+      return res.status(403).json({
+        error: 'You do not have permission to view global inventory',
+      });
+    }
+
     const { limit, offset, search, category } = req.query;
     const products = await productService.getProducts(organizationId, userId, {
       limit: limit ? parseInt(limit) : 50,

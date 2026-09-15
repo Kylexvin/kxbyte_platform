@@ -10,6 +10,7 @@ import exportController from '../controllers/export.controller.js';
 import transferController from '../transfer/controllers/transfer.controller.js';
 import staffController from '../controllers/staff.controller.js';
 import customerController from '../controllers/customer.controller.js';
+import branchController from '../controllers/branch.controller.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 
 const router = express.Router({ mergeParams: true });
@@ -40,6 +41,11 @@ router.patch('/branches/:branchId/products/:productId', productController.update
 router.get('/branches/:branchId/products', productController.getBranchProducts);
 router.patch('/branches/:branchId/products/:productId/stock', productController.updateBranchProductStock);
 
+// ============================================================
+// BRANCH ROUTES (Read-only KxTill view)
+// ============================================================
+router.get('/branches', branchController.getBranches);
+router.get('/branches/:branchId', branchController.getBranchOverview);
 // ============================================================
 // SALE ROUTES
 // ============================================================
