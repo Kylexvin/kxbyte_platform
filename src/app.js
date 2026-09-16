@@ -1,9 +1,9 @@
 // src/app.js
-
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import compression from 'compression';
+import compression from 'compression'; 
 import morgan from 'morgan';
 import session from 'express-session';
 import passport from './modules/platform/identity/config/passport.config.js';
@@ -203,7 +203,7 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
   });
-});
+}); 
 
 // ============================================================
 // PRODUCT INITIALIZATION
