@@ -501,6 +501,7 @@ const getBranchProductsForSync = async (organizationId, branchId, since, limit =
     isAvailable: true,
     product: {
       organizationId,
+      isActive: true,          
     },
   };
 
