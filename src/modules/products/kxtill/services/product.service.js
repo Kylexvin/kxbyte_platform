@@ -455,7 +455,62 @@ const updateBranchProductStock = async (organizationId, userId, branchId, produc
   return updated;
 };
 
+const removeBranchProduct = async (organizationId, userId, branchId, productId) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
 
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.inventory.update');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to update inventory');
+  }
+
+  // Branch access check (only if user doesn't have all branches)
+  if (!membership.hasAllBranches) {
+    const hasBranchAccess = await prisma.branchAssignment.findUnique({
+      where: {
+        membershipId_branchId: {
+          membershipId: membership.id,
+          branchId,
+        },
+      },
+    });
+    if (!hasBranchAccess) {
+      throw new Error('You do not have access to this branch');
+    }
+  }
+
+  const branchProduct = await prisma.kxTillBranchProduct.findFirst({
+    where: {
+      productId,
+      branchId,
+      product: { organizationId },
+    },
+  });
+
+  if (!branchProduct) {
+    throw new Error('Branch product not found');
+  }
+
+  // Soft remove: mark unavailable, don't delete. The global product
+  // stays intact and the branch row can be reactivated later.
+  const updated = await prisma.kxTillBranchProduct.update({
+    where: { id: branchProduct.id },
+    data: { isAvailable: false },
+  });
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'KXTILL_BRANCH_PRODUCT_REMOVED',
+    resource: 'branch_product',
+    resourceId: branchProduct.id,
+    metadata: { productId, branchId },
+  });
+
+  return updated;
+};
 
 const updateProductUnit = async (organizationId, userId, productId, unitId, data) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -564,4 +619,5 @@ export default {
   getProductsForSync,
   getBranchProductsForSync,
   updateBranchProduct,
+  removeBranchProduct,
 };

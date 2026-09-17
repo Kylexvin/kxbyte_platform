@@ -58,12 +58,13 @@ const getProducts = async (req, res) => {
       });
     }
 
-    const { limit, offset, search, category } = req.query;
+    const { limit, offset, search, category, includeArchived } = req.query;
     const products = await productService.getProducts(organizationId, userId, {
       limit: limit ? parseInt(limit) : 50,
       offset: offset ? parseInt(offset) : 0,
       search,
       category,
+      includeArchived: includeArchived === 'true',
     });
     res.status(200).json(products);
   } catch (error) {
@@ -224,7 +225,7 @@ const getBranchProducts = async (req, res) => {
     }
 
     const { organizationId, branchId } = req.params;
-    const { limit, offset, search, category } = req.query;
+    const { limit, offset, search, category, includeUnavailable } = req.query;
 
     const result = await productService.getBranchProducts(
       organizationId,
@@ -235,6 +236,7 @@ const getBranchProducts = async (req, res) => {
         offset: offset ? parseInt(offset) : 0,
         search,
         category,
+        includeUnavailable: includeUnavailable === 'true',
       }
     );
 
@@ -281,6 +283,42 @@ const updateBranchProduct = async (req, res) => {
       return res.status(404).json({ error: error.message });
     }
     console.error('Update branch product error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const removeBranchProduct = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, branchId, productId } = req.params;
+
+    const result = await productService.removeBranchProduct(
+      organizationId,
+      userId,
+      branchId,
+      productId
+    );
+
+    res.status(200).json({
+      message: 'Product removed from branch',
+      branchProduct: result,
+    });
+  } catch (error) {
+    if (error.message === 'You do not have access to this organization' ||
+        error.message === 'You do not have access to this branch') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'Branch product not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    if (error.message === 'You do not have permission to update inventory') {
+      return res.status(403).json({ error: error.message });
+    }
+    console.error('Remove branch product error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -528,5 +566,6 @@ export default {
   getProductsForSync,
   getBranchProductsForSync,
   updateBranchProduct,
+  removeBranchProduct,
 
-};
+}; 

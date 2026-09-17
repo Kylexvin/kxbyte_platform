@@ -40,7 +40,8 @@ router.patch('/branches/:branchId/products/:productId', productController.update
 // ============================================================
 router.get('/branches/:branchId/products', productController.getBranchProducts);
 router.patch('/branches/:branchId/products/:productId/stock', productController.updateBranchProductStock);
-
+router.delete('/branches/:branchId/products/:productId', productController.removeBranchProduct);   // ← add
+router.patch('/branches/:branchId/products/:productId', productController.updateBranchProduct);
 // ============================================================
 // BRANCH ROUTES (Read-only KxTill view)
 // ============================================================

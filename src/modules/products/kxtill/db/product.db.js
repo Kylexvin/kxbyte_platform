@@ -26,8 +26,13 @@ const findProductById = async (id, organizationId) => {
 };
 
 const findProductsByOrganization = async (organizationId, filters = {}) => {
-  const { limit = 50, offset = 0, search, category } = filters;
-  const where = { organizationId, isActive: true };
+  const { limit = 50, offset = 0, search, category, includeArchived } = filters;
+
+  const where = { organizationId };
+
+  if (!includeArchived) {
+    where.isActive = true;
+  }
 
   if (search) {
     where.OR = [
@@ -203,14 +208,18 @@ const getLowStockProducts = async (organizationId) => {
 };
 
 const getBranchProducts = async (branchId, filters = {}) => {
-  const { limit = 50, offset = 0, search, category } = filters;
+  const { limit = 50, offset = 0, search, category, includeUnavailable } = filters;
+
   const where = {
     branchId,
-    isAvailable: true,
     product: {
       isActive: true,
     },
   };
+
+  if (!includeUnavailable) {
+    where.isAvailable = true;
+  }
 
   if (search) {
     where.product.OR = [
