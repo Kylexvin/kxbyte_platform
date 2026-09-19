@@ -12,146 +12,129 @@ import staffController from '../controllers/staff.controller.js';
 import customerController from '../controllers/customer.controller.js';
 import branchController from '../controllers/branch.controller.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
+import subscriptionMiddleware from '../../../platform/subscriptions/middleware/subscription.middleware.js';
 
 const router = express.Router({ mergeParams: true });
 
 router.use(authMiddleware.authenticate);
 
+// Subscription guard for KxTill
+const guard = subscriptionMiddleware.requireActiveSubscription('kxtill');
+
 // ============================================================
 // PRODUCT ROUTES
 // ============================================================
-// Static routes FIRST (no :param)
-router.post('/products', productController.createProduct);
-router.get('/products', productController.getProducts);
-router.post('/products/bulk', productController.bulkCreateProducts);
-router.get('/products/search', productController.searchProducts);
-router.get('/products/barcode/:barcode', productController.getProductByBarcode);
+router.post('/products', guard, productController.createProduct);
+router.get('/products', guard, productController.getProducts);
+router.post('/products/bulk', guard, productController.bulkCreateProducts);
+router.get('/products/search', guard, productController.searchProducts);
+router.get('/products/barcode/:barcode', guard, productController.getProductByBarcode);
 
-
-// Dynamic routes LAST (with :param)
-router.patch('/products/:productId/units/:unitId', productController.updateProductUnit);
-router.get('/products/:productId', productController.getProduct);
-router.patch('/products/:productId', productController.updateProduct);
-router.delete('/products/:productId', productController.deleteProduct);
-router.patch('/branches/:branchId/products/:productId', productController.updateBranchProduct);
+router.patch('/products/:productId/units/:unitId', guard, productController.updateProductUnit);
+router.get('/products/:productId', guard, productController.getProduct);
+router.patch('/products/:productId', guard, productController.updateProduct);
+router.delete('/products/:productId', guard, productController.deleteProduct);
+router.patch('/branches/:branchId/products/:productId', guard, productController.updateBranchProduct);
 
 // ============================================================
-// BRANCH PRODUCT ROUTES (Branch-level inventory)
+// BRANCH PRODUCT ROUTES
 // ============================================================
-router.get('/branches/:branchId/products', productController.getBranchProducts);
-router.patch('/branches/:branchId/products/:productId/stock', productController.updateBranchProductStock);
-router.delete('/branches/:branchId/products/:productId', productController.removeBranchProduct);   // ← add
-router.patch('/branches/:branchId/products/:productId', productController.updateBranchProduct);
+router.get('/branches/:branchId/products', guard, productController.getBranchProducts);
+router.patch('/branches/:branchId/products/:productId/stock', guard, productController.updateBranchProductStock);
+router.delete('/branches/:branchId/products/:productId', guard, productController.removeBranchProduct);
+router.patch('/branches/:branchId/products/:productId', guard, productController.updateBranchProduct);
+
 // ============================================================
-// BRANCH ROUTES (Read-only KxTill view)
+// BRANCH ROUTES
 // ============================================================
-router.get('/branches', branchController.getBranches);
-router.get('/branches/:branchId', branchController.getBranchOverview);
+router.get('/branches', guard, branchController.getBranches);
+router.get('/branches/:branchId', guard, branchController.getBranchOverview);
+
 // ============================================================
 // SALE ROUTES
 // ============================================================
-router.post('/sales', saleController.createSale);
-router.post('/sales/offline', saleController.createOfflineSale);
-router.get('/sales', saleController.getSales);
-router.get('/sales/:saleId', saleController.getSale);
-router.post('/sales/:saleId/refund', saleController.refundSale);
-router.get('/sales/:saleId/receipt', receiptController.generateReceipt);
+router.post('/sales', guard, saleController.createSale);
+router.post('/sales/offline', guard, saleController.createOfflineSale);
+router.get('/sales', guard, saleController.getSales);
+router.get('/sales/:saleId', guard, saleController.getSale);
+router.post('/sales/:saleId/refund', guard, saleController.refundSale);
+router.get('/sales/:saleId/receipt', guard, receiptController.generateReceipt);
 
 // ============================================================
-// SYNC ROUTES (Offline-first)
+// SYNC ROUTES
 // ============================================================
-router.get('/sync/products', productController.getProductsForSync);
-router.get('/sync/branch-products', productController.getBranchProductsForSync);
+router.get('/sync/products', guard, productController.getProductsForSync);
+router.get('/sync/branch-products', guard, productController.getBranchProductsForSync);
+
 // ============================================================
 // TRANSFER ROUTES
 // ============================================================
-// Static routes FIRST
-router.get('/transfers/stats', transferController.getTransferStats);
-router.get('/transfers/form-data', transferController.getTransferFormData);
-
-// Dynamic routes LAST
-router.post('/transfers', transferController.createTransfer);
-router.get('/transfers', transferController.getTransfers);
-router.get('/transfers/:transferId', transferController.getTransfer);
-router.patch('/transfers/:transferId/approve', transferController.approveTransfer);
-router.patch('/transfers/:transferId/complete', transferController.completeTransfer);
-router.patch('/transfers/:transferId/reject', transferController.rejectTransfer);
+router.get('/transfers/stats', guard, transferController.getTransferStats);
+router.get('/transfers/form-data', guard, transferController.getTransferFormData);
+router.post('/transfers', guard, transferController.createTransfer);
+router.get('/transfers', guard, transferController.getTransfers);
+router.get('/transfers/:transferId', guard, transferController.getTransfer);
+router.patch('/transfers/:transferId/approve', guard, transferController.approveTransfer);
+router.patch('/transfers/:transferId/complete', guard, transferController.completeTransfer);
+router.patch('/transfers/:transferId/reject', guard, transferController.rejectTransfer);
 
 // ============================================================
 // STAFF ROUTES
 // ============================================================
-router.get('/staff', staffController.getStaff);
-router.patch('/staff/:targetUserId', staffController.updateStaff);
-router.delete('/staff/:targetUserId', staffController.removeStaff);
-
+router.get('/staff', guard, staffController.getStaff);
+router.patch('/staff/:targetUserId', guard, staffController.updateStaff);
+router.delete('/staff/:targetUserId', guard, staffController.removeStaff);
 
 // ============================================================
 // SETTINGS
 // ============================================================
-router.get('/settings', settingController.getSettings);
-router.patch('/settings', settingController.updateSettings);
+router.get('/settings', guard, settingController.getSettings);
+router.patch('/settings', guard, settingController.updateSettings);
 
 // ============================================================
-// DASHBOARD ROUTES
+// DASHBOARD ROUTES (reads)
 // ============================================================
-// Summary
-router.get('/dashboard/summary', reportController.getDashboardSummary);
+router.get('/dashboard/summary', guard, reportController.getDashboardSummary);
+router.get('/dashboard/sales-chart', guard, reportController.getSalesChart);
+router.get('/dashboard/top-products', guard, reportController.getTopProducts);
+router.get('/dashboard/recent-sales', guard, reportController.getRecentSales);
+router.get('/dashboard/today-sales', guard, reportController.getTodaySales);
+router.get('/dashboard/payment-methods', guard, reportController.getPaymentMethodDistribution);
+router.get('/dashboard/branch-breakdown', guard, reportController.getBranchBreakdown);
+router.get('/dashboard/returns-summary', guard, reportController.getReturnsSummary);
+router.get('/dashboard/low-stock', guard, reportController.getLowStock);
+router.get('/dashboard/branch-overview', guard, reportController.getBranchOverview);
+router.get('/dashboard/inventory-alerts', guard, reportController.getInventoryAlerts);
+router.get('/inventory/summary', guard, reportController.getInventorySummary);
+router.get('/inventory/health', guard, reportController.getInventoryHealth);
+router.get('/inventory/needs-attention', guard, reportController.getNeedsAttention);
+router.get('/inventory/activity', guard, reportController.getStockActivity);
+router.get('/inventory/branches', guard, reportController.getBranchStock);
+router.get('/dashboard/profit', guard, reportController.getProfit);
+router.get('/dashboard/today-stats', guard, reportController.getTodayStats);
+router.get('/dashboard/sales-trend', guard, reportController.getSalesTrend);
+router.get('/dashboard/today-sales-trend', guard, reportController.getTodaySalesTrend);
 
-// Sales chart
-router.get('/dashboard/sales-chart', reportController.getSalesChart);
-
-// Top products (branch-aware)
-router.get('/dashboard/top-products', reportController.getTopProducts);
-
-// Recent sales
-router.get('/dashboard/recent-sales', reportController.getRecentSales);
-
-// Today's sales
-router.get('/dashboard/today-sales', reportController.getTodaySales);
-router.get('/dashboard/payment-methods', reportController.getPaymentMethodDistribution);
-router.get('/dashboard/branch-breakdown', reportController.getBranchBreakdown);
-router.get('/dashboard/returns-summary', reportController.getReturnsSummary);
-
-// Low stock (branch-aware)
-router.get('/dashboard/low-stock', reportController.getLowStock);
-
-// Branch overview
-router.get('/dashboard/branch-overview', reportController.getBranchOverview);
-
-// Inventory alerts (branch-aware)
-router.get('/dashboard/inventory-alerts', reportController.getInventoryAlerts);
-
-// Inventory Dashboard routes
-router.get('/inventory/summary', reportController.getInventorySummary);
-router.get('/inventory/health', reportController.getInventoryHealth);
-router.get('/inventory/needs-attention', reportController.getNeedsAttention);
-router.get('/inventory/activity', reportController.getStockActivity);
-router.get('/inventory/branches', reportController.getBranchStock);
-router.get('/dashboard/profit', reportController.getProfit);
-router.get('/dashboard/today-stats', reportController.getTodayStats);
-router.get('/dashboard/sales-trend', reportController.getSalesTrend);
-router.get('/dashboard/today-sales-trend', reportController.getTodaySalesTrend);
 // ============================================================
-// EXPORTS ROUTES
+// EXPORTS ROUTES (reads)
 // ============================================================
-router.get('/reports/export/sales', exportController.exportSales);
-router.get('/reports/export/stock', exportController.exportStock);
-router.get('/reports/export/top-products', exportController.exportTopProducts);
-router.get('/reports/export/branches', exportController.exportBranchPerformance);
-router.get('/reports/export/tax', exportController.exportTax);
-router.get('/reports/export/audit', exportController.exportAudit);
+router.get('/reports/export/sales', guard, exportController.exportSales);
+router.get('/reports/export/stock', guard, exportController.exportStock);
+router.get('/reports/export/top-products', guard, exportController.exportTopProducts);
+router.get('/reports/export/branches', guard, exportController.exportBranchPerformance);
+router.get('/reports/export/tax', guard, exportController.exportTax);
+router.get('/reports/export/audit', guard, exportController.exportAudit);
 
 // ============================================================
 // CUSTOMER ROUTES
 // ============================================================
+router.get('/customers/sync', guard, customerController.getCustomersForSync);
+router.post('/customers/sync', guard, customerController.syncOfflineCustomers);
+router.get('/customers', guard, customerController.getCustomers);
+router.post('/customers', guard, customerController.createCustomer);
+router.patch('/customers/:customerId', guard, customerController.updateCustomer);
+router.delete('/customers/:customerId', guard, customerController.deleteCustomer);
+router.get('/customers/:customerId', guard, customerController.getCustomer);
+router.get('/customers/:customerId/sales', guard, customerController.getCustomerSales);
 
-router.get('/customers/sync', customerController.getCustomersForSync);
-router.post('/customers/sync', customerController.syncOfflineCustomers);
-router.get('/customers', customerController.getCustomers);
-router.post('/customers', customerController.createCustomer);
-router.patch('/customers/:customerId', customerController.updateCustomer);
-router.delete('/customers/:customerId', customerController.deleteCustomer);
-router.get('/customers/:customerId', customerController.getCustomer);
-router.get('/customers/:customerId/sales', customerController.getCustomerSales);
-
-export default router;
+export default router; 

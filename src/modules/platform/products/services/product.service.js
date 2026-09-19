@@ -9,48 +9,42 @@ import audit from '../../audit/index.js';
 import { addDays } from 'date-fns';
 
 const createSubscriptionForProduct = async (organizationId, productKey) => {
+  const plans = await planDb.findPlansByProduct(productKey);
+  if (!plans || plans.length === 0) {
+    throw new Error(`No active plans registered for product ${productKey}`);
+  }
+
+  // Plans come ordered by price ASC from planDb.findPlansByProduct.
+  // First active plan is the default. Products may define more later.
+  const defaultPlan = plans[0];
+
   try {
-    const plans = await planDb.findPlansByProduct(productKey);
-    if (plans && plans.length > 0) {
-      const defaultPlan = plans.find((p) => p.key === 'professional') || plans[0];
-      await subscriptionService.createSubscription(
-        organizationId,
-        productKey,
-        defaultPlan.key
-      );
-      console.log(`Subscription created for ${productKey} (${defaultPlan.name})`);
-    } else {
-      console.log(`No plans found for ${productKey}, subscription not created`);
-    }
+    await subscriptionService.createSubscription(organizationId, productKey, defaultPlan.key);
+    console.log(`Subscription created for ${productKey} (plan=${defaultPlan.key}, trialDays=${defaultPlan.trialDays})`);
   } catch (error) {
     if (error.message === 'Subscription already exists for this product') {
       console.log(`Subscription already exists for ${productKey}`);
-    } else {
-      console.error(`Failed to create subscription for ${productKey}:`, error.message);
+      return;
     }
+    throw error;
   }
 };
 
 const reactivateSubscription = async (organizationId, productKey) => {
-  try {
-    const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
-    
-    if (!subscription) {
-      await createSubscriptionForProduct(organizationId, productKey);
-      return;
-    }
+  const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
 
-    if (subscription.status === 'CANCELLED' || subscription.status === 'EXPIRED') {
-      await subscriptionDb.updateSubscription(subscription.id, {
-        status: 'ACTIVE',
-        cancelledAt: null,
-        expiredAt: null,
-      });
-      
-      console.log(`Subscription reactivated for ${productKey}`);
-    }
-  } catch (error) {
-    console.error(`Failed to reactivate subscription for ${productKey}:`, error.message);
+  if (!subscription) {
+    await createSubscriptionForProduct(organizationId, productKey);
+    return;
+  }
+
+  if (subscription.status === 'CANCELLED' || subscription.status === 'EXPIRED') {
+    await subscriptionDb.updateSubscription(subscription.id, {
+      status: 'ACTIVE',
+      cancelledAt: null,
+      expiredAt: null,
+    });
+    console.log(`Subscription reactivated for ${productKey}`);
   }
 };
 

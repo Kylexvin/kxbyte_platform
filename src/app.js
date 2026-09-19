@@ -73,6 +73,7 @@ app.use((req, res, next) => {
   next();
 });
 
+
 // ============================================================
 // ENVIRONMENT VARIABLES FOR CSP
 // ============================================================
@@ -186,13 +187,16 @@ support.register(app);
 customers.register(app);
 
 // ============================================================
-// KXTILL ROUTE REGISTRATION
+// PRODUCT ROUTE REGISTRATION
 // ============================================================
 
-const kxtill = productRegistry.kxtill;
-if (kxtill?.register) {
-  kxtill.register(app);
+for (const [key, product] of Object.entries(productRegistry)) {
+  if (product?.register) {
+    product.register(app);
+    console.log(`Mounted product routes: ${product.name} (${key})`);
+  }
 }
+
 
 // ============================================================
 // HEALTH CHECK

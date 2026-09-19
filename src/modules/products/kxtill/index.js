@@ -11,47 +11,30 @@ const KxTill = {
   
   permissions,
 
-  subscription: {
-    trialDays: 21,
-    plans: [
-      {
-        key: 'professional',
-        name: 'Professional',
-        price: 699,
-        currency: 'KES',
-        interval: 'MONTHLY',
-        features: ['sales', 'inventory', 'customers', 'reports'],
-        limits: {
-          users: 5,
-          products: 5000,
-        },
-      },
-      {
-        key: 'business',
-        name: 'Business',
-        price: 999,
-        currency: 'KES',
-        interval: 'MONTHLY',
-        features: ['sales', 'inventory', 'customers', 'reports', 'advanced_reports', 'api'],
-        limits: {
-          users: 20,
-          products: 50000,
-        },
-      },
-    ],
-  },
+subscription: {
+  plans: [
+    {
+      key: 'standard',
+      name: 'Standard',
+      price: 0,
+      currency: 'KES',
+      interval: 'MONTHLY',
+      trialDays: 14,
+      features: [],
+      limits: null,
+    },
+  ],
+},
 
   initialize: async ({ organizationId }) => {
     console.log(`[KxTill] Initializing for organization ${organizationId}`);
     return { success: true };
   },
 
-  // Routes registration
   register: (app) => {
     app.use('/api/v1/organizations/:organizationId/kxtill', kxtillRoutes);
   },
 
-  // Service exports for other modules
   productService,
 };
 

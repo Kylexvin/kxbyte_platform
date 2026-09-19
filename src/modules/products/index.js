@@ -1,9 +1,12 @@
 // src/modules/products/index.js
 
+import admin from './admin/index.js';
 import KxTill from './kxtill/index.js';
 
+
 const products = {
-  kxtill: KxTill,
+  admin: admin,
+  kxtill: KxTill
   
   };
 

@@ -2,6 +2,50 @@
 
 import subscriptionService from '../services/subscription.service.js';
 
+// ============================================================
+// READ vs WRITE INFERENCE
+// ============================================================
+// During GRACE, read operations pass, write operations block.
+// We infer action from the last segment of the route path.
+//   e.g. POST /sales              → 'sales'      → read?  no  (not in suffixes → read)
+//   e.g. POST /products/create    → 'create'     → write
+//   e.g. PUT  /products/:id       → 'id'         → read?  no  (falls back to read)
+//
+// To make this reliable, we ALSO honor req.method:
+//   GET/HEAD/OPTIONS = read
+//   POST/PUT/PATCH/DELETE = write (unless the last path segment ends with a read suffix)
+// ============================================================
+
+const READ_SUFFIXES = ['view', 'list', 'get', 'search', 'report', 'reports', 'export'];
+const WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+
+const inferAction = (req) => {
+  // Method is authoritative for GET/HEAD
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    return 'read';
+  }
+
+  const parts = (req.baseUrl + req.path).split('/').filter(Boolean);
+  const last = (parts[parts.length - 1] || '').toLowerCase();
+
+  // If the last segment explicitly says "view"/"list"/etc, treat as read
+  // even if the method is POST (e.g. POST /sales/search).
+  if (READ_SUFFIXES.some((s) => last.endsWith(s))) {
+    return 'read';
+  }
+
+  // Otherwise, any non-GET is a write
+  if (WRITE_METHODS.includes(req.method)) {
+    return 'write';
+  }
+
+  return 'read';
+};
+
+// ============================================================
+// requireActiveSubscription
+// ============================================================
+
 const requireActiveSubscription = (productKey) => {
   return async (req, res, next) => {
     try {
@@ -10,7 +54,6 @@ const requireActiveSubscription = (productKey) => {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
-      // Get organizationId from params or body
       const organizationId = req.params.organizationId || req.body.organizationId;
       if (!organizationId) {
         return res.status(400).json({ error: 'Organization ID required' });
@@ -25,6 +68,27 @@ const requireActiveSubscription = (productKey) => {
         });
       }
 
+      // TRIAL and ACTIVE: full access
+      if (status.status === 'TRIAL' || status.status === 'ACTIVE') {
+        req.subscription = status;
+        return next();
+      }
+
+      // GRACE: read-only window. Reads pass, writes block.
+      if (status.status === 'GRACE') {
+        const action = inferAction(req);
+        if (action === 'write') {
+          return res.status(403).json({
+            error: 'Subscription in grace period. Read-only access.',
+            code: 'SUBSCRIPTION_GRACE_READONLY',
+            graceEnd: status.graceEnd,
+          });
+        }
+        req.subscription = status;
+        return next();
+      }
+
+      // EXPIRED / SUSPENDED / CANCELLED: block everything
       if (status.status === 'EXPIRED') {
         return res.status(403).json({
           error: 'Subscription has expired. Please renew.',
@@ -47,15 +111,22 @@ const requireActiveSubscription = (productKey) => {
         });
       }
 
-      // Attach subscription info to request
-      req.subscription = status;
-      next();
+      // Unknown status — fail closed
+      return res.status(403).json({
+        error: 'Subscription is not active',
+        code: 'SUBSCRIPTION_INACTIVE',
+        status: status.status,
+      });
     } catch (error) {
       console.error('Subscription middleware error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
 };
+
+// ============================================================
+// requirePlanFeature
+// ============================================================
 
 const requirePlanFeature = (productKey, feature) => {
   return async (req, res, next) => {
@@ -72,14 +143,14 @@ const requirePlanFeature = (productKey, feature) => {
 
       const status = await subscriptionService.getSubscriptionStatus(organizationId, productKey);
 
-      if (!status.isActive) {
+      // Only TRIAL/ACTIVE unlock features
+      if (status.status !== 'TRIAL' && status.status !== 'ACTIVE') {
         return res.status(403).json({
           error: 'Active subscription required',
           code: 'SUBSCRIPTION_INACTIVE',
         });
       }
 
-      // Check if plan has the feature
       const plan = status.plan;
       if (!plan || !plan.features || !plan.features.includes(feature)) {
         return res.status(403).json({
@@ -97,6 +168,10 @@ const requirePlanFeature = (productKey, feature) => {
   };
 };
 
+// ============================================================
+// requirePlanLimit
+// ============================================================
+
 const requirePlanLimit = (productKey, limitKey) => {
   return async (req, res, next) => {
     try {
@@ -112,14 +187,13 @@ const requirePlanLimit = (productKey, limitKey) => {
 
       const status = await subscriptionService.getSubscriptionStatus(organizationId, productKey);
 
-      if (!status.isActive) {
+      if (status.status !== 'TRIAL' && status.status !== 'ACTIVE') {
         return res.status(403).json({
           error: 'Active subscription required',
           code: 'SUBSCRIPTION_INACTIVE',
         });
       }
 
-      // Check if plan has the limit
       const plan = status.plan;
       if (!plan || !plan.limits || plan.limits[limitKey] === undefined) {
         return res.status(403).json({
@@ -128,7 +202,6 @@ const requirePlanLimit = (productKey, limitKey) => {
         });
       }
 
-      // Attach limit value to request
       req.limit = plan.limits[limitKey];
       next();
     } catch (error) {

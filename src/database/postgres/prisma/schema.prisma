@@ -87,6 +87,7 @@ model Organization {
   country     String
   currency    String   @default("KES")
   timezone    String   @default("Africa/Nairobi")
+  isInternal  Boolean  @default(false)
   isActive    Boolean  @default(true)
   isArchived  Boolean  @default(false)
   createdAt   DateTime @default(now())
@@ -111,6 +112,7 @@ model Organization {
   customers Customer[]
 
   @@index([ownerId])
+  @@index([isInternal])
   @@index([slug])
   @@map("organizations")
 }

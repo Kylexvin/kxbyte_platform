@@ -5,36 +5,61 @@ import permissionDb from '../db/permission.db.js';
 import orgDb from '../../organizations/db/org.db.js';
 import audit from '../../audit/index.js';
 
+const KXBYTE_SLUG = 'kxbyte';
+const PLATFORM_ADMIN_ROLE = 'platform_admin';
+
+
+// ============================================================
+// PLATFORM ADMIN CHECK (cached per request lifetime would be nice, keep simple for now)
+// ============================================================
+
+const isPlatformAdmin = async (userId) => {
+  const kxbyte = await orgDb.findOrganizationBySlug(KXBYTE_SLUG);
+  if (!kxbyte) return false;
+
+  const membership = await orgDb.findMembership(userId, kxbyte.id);
+  if (!membership || !membership.isActive) return false;
+
+  // Owner of kxbyte org is platform admin by definition
+  if (kxbyte.ownerId === userId) return true;
+
+  // Otherwise must have platform_admin role
+  if (!membership.roleId) return false;
+  const role = await roleDb.findRoleById(membership.roleId);
+  return role?.name === PLATFORM_ADMIN_ROLE;
+};
+
 // ============================================================
 // USER PERMISSIONS
 // ============================================================
 
 const getAllUserPermissions = async (userId, organizationId) => {
-  const organization = await orgDb.findOrganizationById(organizationId);
-  if (!organization) {
-    return [];
-  }
-
-  // Owner has all permissions → return ["*"]
-  if (organization.ownerId === userId) {
+  // Platform admins get everything, everywhere
+  if (await isPlatformAdmin(userId)) {
     return ["*"];
   }
 
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (!organization) return [];
+
+  if (organization.ownerId === userId) return ["*"];
+
   const membership = await orgDb.findMembership(userId, organizationId);
-  if (!membership || !membership.isActive || !membership.roleId) {
-    return [];
-  }
+  if (!membership || !membership.isActive || !membership.roleId) return [];
 
   const role = await roleDb.findRoleById(membership.roleId);
-  if (!role) {
-    return [];
-  }
+  if (!role) return [];
 
   const rolePermissions = role.permissions || [];
   return rolePermissions.map(rp => rp.permission.key);
 };
 
 const checkPermission = async (userId, organizationId, permissionKey) => {
+  // Platform admins bypass everything, everywhere
+  if (await isPlatformAdmin(userId)) {
+    return true;
+  }
+
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     return false;
@@ -374,4 +399,5 @@ export default {
   removePermissionFromRole,
   assignRoleToMember,
   getAllUserPermissions,
+  isPlatformAdmin,
 };

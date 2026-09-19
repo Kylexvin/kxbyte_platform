@@ -2,6 +2,19 @@
 
 import prisma from '../../../../database/postgres/prisma.js';
 
+const findNotificationByTypeAndResource = async ({ type, resource, resourceId, threshold }) => {
+  return prisma.notification.findFirst({
+    where: {
+      type,
+      resource,
+      resourceId,
+      ...(threshold !== undefined && {
+        metadata: { path: ['threshold'], equals: threshold },
+      }),
+    },
+  });
+};
+
 const createNotification = async (data) => {
   return prisma.notification.create({ data });
 };
@@ -93,6 +106,7 @@ const markAsSent = async (id) => {
 };
 
 export default {
+  findNotificationByTypeAndResource,
   createNotification,
   findNotificationsByUser,
   findNotificationById,
@@ -100,4 +114,5 @@ export default {
   markAllAsRead,
   countUnread,
   markAsSent,
+
 };

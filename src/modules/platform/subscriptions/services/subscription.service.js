@@ -1,6 +1,7 @@
 // src/modules/platform/subscriptions/services/subscription.service.js
 
 import subscriptionDb from '../db/subscription.db.js';
+import notificationDb from '../../notifications/db/notification.db.js';
 import planDb from '../db/plan.db.js';
 import orgDb from '../../organizations/db/org.db.js';
 import { addDays } from 'date-fns';
@@ -14,6 +15,351 @@ const SUBSCRIPTION_STATUS = {
   EXPIRED: 'EXPIRED',
   CANCELLED: 'CANCELLED',
   SUSPENDED: 'SUSPENDED',
+};
+
+const GRACE_DAYS = 2;
+
+const REMINDER_THRESHOLDS = [7, 3, 1];
+// ============================================================
+// CRON SWEEP — daily
+// ============================================================
+
+// ============================================================
+// PRE-EXPIRY REMINDERS — TRIAL and ACTIVE
+// ============================================================
+
+
+const fireReminderIfDue = async (sub, field, label) => {
+  const targetDate = sub[field];
+  if (!targetDate) return;
+
+  const now = new Date();
+  const diffDays = Math.ceil((targetDate - now) / (1000 * 60 * 60 * 24));
+
+  if (!REMINDER_THRESHOLDS.includes(diffDays)) return;
+
+  const type = 'SUBSCRIPTION_EXPIRING_SOON';
+  const existing = await notificationDb.findNotificationByTypeAndResource({
+    type,
+    resource: 'subscription',
+    resourceId: sub.id,
+    threshold: diffDays,
+  });
+  if (existing) return;
+
+  try {
+    const notifications = await import('../../notifications/index.js');
+    const org = await orgDb.findOrganizationById(sub.organizationId);
+    if (!org?.ownerId) return;
+
+    await notifications.default.send({
+      userId: org.ownerId,
+      organizationId: sub.organizationId,
+      type,
+      title: `${diffDays} day${diffDays === 1 ? '' : 's'} left on your ${sub.productKey} subscription`,
+      message: `Your ${sub.productKey} ${label} ends on ${targetDate.toDateString()}. Renew to keep full access.`,
+      channel: 'IN_APP',
+      productKey: sub.productKey,
+      resource: 'subscription',
+      resourceId: sub.id,
+      metadata: { threshold: diffDays, targetDate, field, phase: label },
+    });
+  } catch (err) {
+    console.error(`Reminder failed for ${sub.id}:`, err.message);
+  }
+};
+
+const runSweep = async () => {
+  const now = new Date();
+  const subs = await subscriptionDb.findSubscriptionsForSweep();
+  const transitions = [];
+
+  for (const sub of subs) {
+    try {
+      // Pre-expiry reminders (only while still TRIAL or ACTIVE, before any transition)
+      if (sub.status === 'TRIAL') {
+        await fireReminderIfDue(sub, 'trialEnd', 'trial');
+      } else if (sub.status === 'ACTIVE') {
+        await fireReminderIfDue(sub, 'currentPeriodEnd', 'billing period');
+      }
+
+      // TRIAL → GRACE (trial ended)
+      if (sub.status === 'TRIAL' && sub.trialEnd && sub.trialEnd <= now) {
+        const graceStart = now;
+        const graceEnd = addDays(now, GRACE_DAYS);
+        await subscriptionDb.updateSubscription(sub.id, {
+          status: 'GRACE',
+          graceStart,
+          graceEnd,
+        });
+        await audit.log({
+          organizationId: sub.organizationId,
+          userId: null,
+          action: 'SUBSCRIPTION_ENTERED_GRACE',
+          resource: 'subscription',
+          resourceId: sub.id,
+          metadata: { productKey: sub.productKey, graceStart, graceEnd, fromTrialEnd: sub.trialEnd },
+        });
+        await fireNotification(sub, 'SUBSCRIPTION_GRACE_STARTED', {
+          graceEnd,
+          daysLeft: GRACE_DAYS,
+        });
+        transitions.push({ id: sub.id, from: 'TRIAL', to: 'GRACE' });
+        continue;
+      }
+
+      // GRACE → EXPIRED (grace ended)
+      if (sub.status === 'GRACE' && sub.graceEnd && sub.graceEnd <= now) {
+        await subscriptionDb.updateSubscription(sub.id, {
+          status: 'EXPIRED',
+          expiredAt: now,
+        });
+        await audit.log({
+          organizationId: sub.organizationId,
+          userId: null,
+          action: 'SUBSCRIPTION_EXPIRED',
+          resource: 'subscription',
+          resourceId: sub.id,
+          metadata: { productKey: sub.productKey, expiredAt: now },
+        });
+        await fireNotification(sub, 'SUBSCRIPTION_EXPIRED', { expiredAt: now });
+        transitions.push({ id: sub.id, from: 'GRACE', to: 'EXPIRED' });
+        continue;
+      }
+
+      // ACTIVE → GRACE (period ended, give read-only grace too)
+      if (sub.status === 'ACTIVE' && sub.currentPeriodEnd && sub.currentPeriodEnd <= now) {
+        const graceStart = now;
+        const graceEnd = addDays(now, GRACE_DAYS);
+        await subscriptionDb.updateSubscription(sub.id, {
+          status: 'GRACE',
+          graceStart,
+          graceEnd,
+        });
+        await audit.log({
+          organizationId: sub.organizationId,
+          userId: null,
+          action: 'SUBSCRIPTION_ENTERED_GRACE',
+          resource: 'subscription',
+          resourceId: sub.id,
+          metadata: { productKey: sub.productKey, graceStart, graceEnd, fromPeriodEnd: sub.currentPeriodEnd },
+        });
+        await fireNotification(sub, 'SUBSCRIPTION_GRACE_STARTED', {
+          graceEnd,
+          daysLeft: GRACE_DAYS,
+        });
+        transitions.push({ id: sub.id, from: 'ACTIVE', to: 'GRACE' });
+      }
+    } catch (err) {
+      console.error(`Sweep failed for subscription ${sub.id}:`, err.message);
+    }
+  }
+
+  console.log(`[subscription-sweep] processed ${subs.length}, transitions:`, transitions);
+  return transitions;
+};
+
+const fireNotification = async (sub, type, metadata) => {
+  try {
+    const notifications = await import('../../notifications/index.js');
+    const org = await orgDb.findOrganizationById(sub.organizationId);
+    if (!org?.ownerId) return;
+    await notifications.default.send({
+      userId: org.ownerId,
+      organizationId: sub.organizationId,
+      type,
+      title: type === 'SUBSCRIPTION_EXPIRED' ? 'Subscription Expired' : 'Subscription Entering Grace Period',
+      message: type === 'SUBSCRIPTION_EXPIRED'
+        ? `Your ${sub.productKey} subscription has expired. Renew to restore write access.`
+        : `Your ${sub.productKey} subscription will enter a 2-day read-only window.`,
+      channel: 'IN_APP',
+      metadata: { productKey: sub.productKey, ...metadata },
+    });
+  } catch (err) {
+    console.error('Notification failed:', err.message);
+  }
+};
+
+// ============================================================
+// ADMIN MANUAL ACTIONS
+// ============================================================
+
+const adminSetStatus = async (organizationId, productKey, adminUserId, payload) => {
+  const sub = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (!sub) throw new Error('Subscription not found');
+
+  const allowed = ['TRIAL', 'ACTIVE', 'GRACE', 'EXPIRED', 'SUSPENDED', 'CANCELLED'];
+  if (!allowed.includes(payload.status)) throw new Error('Invalid status');
+
+  const updates = { status: payload.status };
+  if (payload.trialEnd !== undefined) updates.trialEnd = payload.trialEnd ? new Date(payload.trialEnd) : null;
+  if (payload.currentPeriodStart !== undefined) updates.currentPeriodStart = payload.currentPeriodStart ? new Date(payload.currentPeriodStart) : null;
+  if (payload.currentPeriodEnd !== undefined) updates.currentPeriodEnd = payload.currentPeriodEnd ? new Date(payload.currentPeriodEnd) : null;
+  if (payload.graceStart !== undefined) updates.graceStart = payload.graceStart ? new Date(payload.graceStart) : null;
+  if (payload.graceEnd !== undefined) updates.graceEnd = payload.graceEnd ? new Date(payload.graceEnd) : null;
+
+  // Clear grace window when leaving GRACE
+  if (payload.status === 'ACTIVE' || payload.status === 'TRIAL') {
+    if (payload.graceStart === undefined) updates.graceStart = null;
+    if (payload.graceEnd === undefined) updates.graceEnd = null;
+  }
+
+  // Clear expiredAt when leaving EXPIRED
+  if (payload.status !== 'EXPIRED' && sub.status === 'EXPIRED') {
+    updates.expiredAt = null;
+  }
+
+  // Clear cancelledAt when leaving CANCELLED
+  if (payload.status !== 'CANCELLED' && sub.status === 'CANCELLED') {
+    updates.cancelledAt = null;
+  }
+
+  if (payload.status === 'EXPIRED' && !updates.expiredAt) updates.expiredAt = new Date();
+  if (payload.status === 'CANCELLED') updates.cancelledAt = new Date();
+
+  const result = await subscriptionDb.updateSubscription(sub.id, updates);
+
+  await audit.log({
+    organizationId,
+    userId: adminUserId,
+    action: 'SUBSCRIPTION_ADMIN_STATUS_SET',
+    resource: 'subscription',
+    resourceId: sub.id,
+    metadata: { productKey, from: sub.status, to: payload.status, updates },
+  });
+
+  return result;
+};
+
+const adminSetDates = async (organizationId, productKey, adminUserId, payload) => {
+  const sub = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (!sub) throw new Error('Subscription not found');
+
+  const updates = {};
+  for (const f of ['trialStart', 'trialEnd', 'graceStart', 'graceEnd', 'currentPeriodStart', 'currentPeriodEnd']) {
+    if (payload[f] !== undefined) updates[f] = payload[f] ? new Date(payload[f]) : null;
+  }
+
+  const result = await subscriptionDb.updateSubscription(sub.id, updates);
+  await audit.log({
+    organizationId,
+    userId: adminUserId,
+    action: 'SUBSCRIPTION_ADMIN_DATES_SET',
+    resource: 'subscription',
+    resourceId: sub.id,
+    metadata: { productKey, updates },
+  });
+  return result;
+};
+
+const adminRenew = async (organizationId, productKey, adminUserId, payload) => {
+  const sub = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (!sub) throw new Error('Subscription not found');
+
+  const now = new Date();
+  const start = payload.periodStart ? new Date(payload.periodStart) : now;
+  const end = payload.periodEnd ? new Date(payload.periodEnd) : addDays(start, 30);
+
+  // record payment (history)
+  const payment = await subscriptionDb.recordPayment({
+    subscriptionId: sub.id,
+    amount: payload.amount,
+    currency: payload.currency || 'KES',
+    status: 'COMPLETED',
+    method: payload.method || 'MANUAL',
+    reference: payload.reference || null,
+    paidAt: now,
+    metadata: {
+      periodStart: start,
+      periodEnd: end,
+      notes: payload.notes || null,
+      recordedByUserId: adminUserId,
+    },
+  });
+
+  // flip to ACTIVE
+  const result = await subscriptionDb.updateSubscription(sub.id, {
+    status: 'ACTIVE',
+    currentPeriodStart: start,
+    currentPeriodEnd: end,
+    graceStart: null,
+    graceEnd: null,
+    expiredAt: null,
+  });
+
+  await audit.log({
+    organizationId,
+    userId: adminUserId,
+    action: 'SUBSCRIPTION_RENEWED',
+    resource: 'subscription',
+    resourceId: sub.id,
+    metadata: {
+      productKey,
+      amount: payload.amount,
+      currency: payload.currency || 'KES',
+      reference: payload.reference || null,
+      periodStart: start,
+      periodEnd: end,
+      paymentId: payment.id,
+    },
+  });
+
+  return { subscription: result, payment };
+};
+
+const adminExtendTrial = async (organizationId, productKey, adminUserId, days) => {
+  if (!days || days < 1) throw new Error('days must be a positive integer');
+
+  const sub = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (!sub) throw new Error('Subscription not found');
+
+  const base = sub.trialEnd && sub.trialEnd > new Date() ? sub.trialEnd : new Date();
+  const trialEnd = addDays(base, days);
+
+  const result = await subscriptionDb.updateSubscription(sub.id, {
+    status: 'TRIAL',
+    trialEnd,
+    graceStart: null,
+    graceEnd: null,
+    expiredAt: null,
+  });
+
+  await audit.log({
+    organizationId,
+    userId: adminUserId,
+    action: 'SUBSCRIPTION_TRIAL_EXTENDED',
+    resource: 'subscription',
+    resourceId: sub.id,
+    metadata: {
+      productKey,
+      days,
+      previousTrialEnd: sub.trialEnd,
+      newTrialEnd: trialEnd,
+    },
+  });
+
+  return result;
+};
+
+const adminSuspend = async (organizationId, productKey, adminUserId, reason) => {
+  const sub = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (!sub) throw new Error('Subscription not found');
+  const result = await subscriptionDb.updateSubscription(sub.id, { status: 'SUSPENDED' });
+  await audit.log({
+    organizationId,
+    userId: adminUserId,
+    action: 'SUBSCRIPTION_SUSPENDED',
+    resource: 'subscription',
+    resourceId: sub.id,
+    metadata: { productKey, reason: reason || null },
+  });
+  return result;
+};
+
+const getPaymentHistory = async (organizationId, productKey) => {
+  const sub = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (!sub) throw new Error('Subscription not found');
+  return subscriptionDb.findPaymentHistory(sub.id);
 };
 
 const createSubscription = async (organizationId, productKey, planKey) => {
@@ -242,6 +588,11 @@ const enrichSubscription = async (subscription) => {
   enriched.isTrial = status === 'TRIAL';
   enriched.isExpired = status === 'EXPIRED';
 
+ 
+  enriched.isGrace = status === 'GRACE';
+  enriched.isSuspended = status === 'SUSPENDED';
+  enriched.isCancelled = status === 'CANCELLED';
+
   return enriched;
 };
 
@@ -264,11 +615,22 @@ const getSubscriptionStatus = async (organizationId, productKey) => {
     status: enriched.status,
     isActive: enriched.isActive,
     isTrial: enriched.isTrial,
+    isGrace: enriched.status === 'GRACE',
     plan: enriched.plan,
     remainingDays: enriched.remainingDays,
     trialEnd: enriched.trialEnd,
+    graceStart: enriched.graceStart,
+    graceEnd: enriched.graceEnd,
+    currentPeriodStart: enriched.currentPeriodStart,
     currentPeriodEnd: enriched.currentPeriodEnd,
+    expiredAt: enriched.expiredAt,
+    cancelledAt: enriched.cancelledAt,
   };
+};
+
+const adminListAll = async (filters = {}) => {
+  const subs = await subscriptionDb.findAllSubscriptions(filters);
+  return Promise.all(subs.map((s) => enrichSubscription(s)));
 };
 
 const cancelSubscription = async (organizationId, productKey, userId = null) => {
@@ -333,6 +695,7 @@ const renewSubscription = async (organizationId, productKey, userId = null) => {
   return result;
 };
 
+
 export default {
   createSubscription,
   getSubscription,
@@ -344,4 +707,12 @@ export default {
   initiateSubscriptionPayment,
   handleSubscriptionPaymentSuccess,
   SUBSCRIPTION_STATUS,
+  runSweep,
+  adminSetStatus,
+  adminSetDates,
+  adminRenew,
+  adminSuspend,
+  getPaymentHistory,
+  adminListAll,
+  adminExtendTrial
 };

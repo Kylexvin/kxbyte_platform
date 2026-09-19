@@ -63,10 +63,58 @@ const findSubscriptionById = async (id) => {
   });
 };
 
+const findSubscriptionsForSweep = async () => {
+  return prisma.subscription.findMany({
+    where: {
+      status: { in: ['TRIAL', 'ACTIVE', 'GRACE'] },
+    },
+    include: {
+      plan: true,
+      organization: { select: { id: true, name: true, slug: true, ownerId: true } },
+    },
+  });
+};
+
+const findAllSubscriptions = async (filters = {}) => {
+  const where = {};
+  if (filters.productKey) where.productKey = filters.productKey;
+  if (filters.status) where.status = filters.status;
+
+  return prisma.subscription.findMany({
+    where,
+    include: {
+      plan: true,
+      organization: {
+        select: { id: true, name: true, slug: true, ownerId: true, isActive: true },
+      },
+      payments: {
+        orderBy: { paidAt: 'desc' },
+        take: 5,
+      },
+    },
+    orderBy: [{ status: 'asc' }, { currentPeriodEnd: 'asc' }],
+  });
+};
+
+const findPaymentHistory = async (subscriptionId) => {
+  return prisma.payment.findMany({
+    where: { subscriptionId },
+    orderBy: { paidAt: 'desc' },
+  });
+};
+
+const recordPayment = async (data) => {
+  return prisma.payment.create({ data });
+};
+
 export default {
   createSubscription,
   findSubscription,
   findSubscriptionsByOrganization,
   updateSubscription,
   findSubscriptionById,
+  findSubscriptionsForSweep,
+  findAllSubscriptions,
+  findPaymentHistory,
+  recordPayment,
 };
