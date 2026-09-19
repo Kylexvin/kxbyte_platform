@@ -11,6 +11,7 @@ import transferController from '../transfer/controllers/transfer.controller.js';
 import staffController from '../controllers/staff.controller.js';
 import customerController from '../controllers/customer.controller.js';
 import branchController from '../controllers/branch.controller.js';
+import billingController from '../controllers/billing.controller.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 import subscriptionMiddleware from '../../../platform/subscriptions/middleware/subscription.middleware.js';
 
@@ -136,5 +137,11 @@ router.patch('/customers/:customerId', guard, customerController.updateCustomer)
 router.delete('/customers/:customerId', guard, customerController.deleteCustomer);
 router.get('/customers/:customerId', guard, customerController.getCustomer);
 router.get('/customers/:customerId/sales', guard, customerController.getCustomerSales);
+
+//====
+// Billing
+//====
+router.get('/billing', billingController.get);
+router.get('/billing/payments', billingController.payments);
 
 export default router; 
