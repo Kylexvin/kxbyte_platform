@@ -31,10 +31,13 @@ router.post('/oauth/revoke', oauthController.revoke);
 // ============================================================
 
 router.get('/forgot-password', oauthController.forgotPasswordPage);
+router.post('/forgot-password/html', passwordResetLimiter, oauthController.forgotPasswordSubmit);
+router.get('/reset-password', oauthController.resetPasswordPage);
+router.post('/reset-password/html', passwordResetLimiter, oauthController.resetPasswordSubmit);
 router.get('/register', oauthController.registerPage);
 
 // ============================================================
-// STANDARD AUTH (API)
+// STANDARD AUTH (JSON API)
 // ============================================================
 
 router.post('/register', registerLimiter, authController.register);

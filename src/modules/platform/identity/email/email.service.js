@@ -241,8 +241,8 @@ const sendEmail = async ({ to, from, subject, html, replyTo }) => {
 // ============================================================
 
 export const sendVerificationEmail = async (email, token, firstName) => {
-  const verificationUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/verify-email?token=${token}`;
-
+  const authBase = process.env.AUTH_BASE_URL || 'http://localhost:5000';
+  const verificationUrl = `${authBase}/api/v1/auth/verify-email?token=${token}`;
   const bodyHtml = `
     <p style="margin:0 0 16px;">Hi <strong>${firstName || 'there'}</strong>,</p>
     <p style="margin:0 0 8px;">
@@ -277,8 +277,8 @@ export const sendVerificationEmail = async (email, token, firstName) => {
 };
 
 export const sendPasswordResetEmail = async (email, token, firstName) => {
-  const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
-
+  const authBase = process.env.AUTH_BASE_URL || 'http://localhost:5000';
+  const resetUrl = `${authBase}/api/v1/auth/reset-password?token=${token}`;
   const bodyHtml = `
     <p style="margin:0 0 16px;">Hi <strong>${firstName || 'there'}</strong>,</p>
     <p style="margin:0 0 8px;">

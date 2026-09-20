@@ -171,7 +171,7 @@ const forgotPasswordPage = async (req, res) => {
     html += '      </div>\n';
   }
 
-  html += '      <form action="' + AUTH_BASE_URL + '/api/v1/auth/forgot-password" method="POST" class="form"' + (successMessage ? ' style="display:none;"' : '') + '>\n';
+  html += '      <form action="' + AUTH_BASE_URL + '/api/v1/auth/forgot-password/html" method="POST" class="form"' + (successMessage ? ' style="display:none;"' : '') + '>\n';
   html += '        <input type="hidden" name="client_id" value="' + client_id + '" />\n';
   html += '        <input type="hidden" name="redirect_uri" value="' + redirect_uri + '" />\n';
   if (state) html += '        <input type="hidden" name="state" value="' + state + '" />\n';
@@ -198,6 +198,303 @@ const forgotPasswordPage = async (req, res) => {
   html += '</html>';
 
   res.send(html);
+};
+
+/**
+ * POST /auth/forgot-password/html - Handle HTML forgot-password form submission
+ */
+const forgotPasswordSubmit = async (req, res) => {
+  const { email, client_id, redirect_uri, state } = req.body;
+
+  const baseParams = new URLSearchParams();
+  if (client_id) baseParams.set('client_id', client_id);
+  if (redirect_uri) baseParams.set('redirect_uri', redirect_uri);
+  if (state) baseParams.set('state', state);
+
+  if (!email) {
+    baseParams.set('error', 'missing_email');
+    return res.redirect(
+      `${AUTH_BASE_URL}/api/v1/auth/forgot-password?${baseParams}`
+    );
+  }
+
+  try {
+    await authService.forgotPassword(email, req);
+    baseParams.set('success', 'email_sent');
+    return res.redirect(
+      `${AUTH_BASE_URL}/api/v1/auth/forgot-password?${baseParams}`
+    );
+  } catch (err) {
+    const code = /too many/i.test(err.message) ? 'rate_limited' : 'failed';
+    baseParams.set('error', code);
+    return res.redirect(
+      `${AUTH_BASE_URL}/api/v1/auth/forgot-password?${baseParams}`
+    );
+  }
+};
+
+/**
+ * GET /auth/reset-password - Render reset password page (with token)
+ */
+const resetPasswordPage = async (req, res) => {
+  const { token, error } = req.query;
+
+  if (!token) {
+    return res.redirect(
+      `${AUTH_BASE_URL}/api/v1/auth/forgot-password?error=invalid_token`
+    );
+  }
+
+  const errorMessage =
+    error === 'invalid_token'
+      ? 'This reset link is invalid or has expired. Please request a new one.'
+      : error === 'weak_password'
+        ? 'Password must be at least 8 characters.'
+        : error === 'password_mismatch'
+          ? 'Passwords do not match.'
+          : error === 'missing_fields'
+            ? 'Please fill in both password fields.'
+            : '';
+
+  let html = '<!DOCTYPE html>\n';
+  html += '<html>\n';
+  html += '<head>\n';
+  html += '  <meta charset="UTF-8">\n';
+  html += '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
+  html += '  <title>New Password - KXBYTE</title>\n';
+  html += '  <style>\n';
+  html += '    * { margin: 0; padding: 0; box-sizing: border-box; }\n';
+  html += '    body {\n';
+  html += '      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;\n';
+  html += '      background: #0e0f13;\n';
+  html += '      color: #eceef2;\n';
+  html += '      min-height: 100vh;\n';
+  html += '      display: flex;\n';
+  html += '      align-items: center;\n';
+  html += '      justify-content: center;\n';
+  html += '      padding: 32px 20px;\n';
+  html += '      position: relative;\n';
+  html += '      overflow: hidden;\n';
+  html += '    }\n';
+  html += '    body::before {\n';
+  html += '      content: "";\n';
+  html += '      position: absolute;\n';
+  html += '      border-radius: 50%;\n';
+  html += '      filter: blur(90px);\n';
+  html += '      pointer-events: none;\n';
+  html += '      z-index: 0;\n';
+  html += '      width: 460px;\n';
+  html += '      height: 460px;\n';
+  html += '      top: -140px;\n';
+  html += '      right: 10%;\n';
+  html += '      background: radial-gradient(circle, rgba(217, 168, 78, 0.18) 0%, rgba(255, 106, 43, 0.06) 55%, transparent 75%);\n';
+  html += '    }\n';
+  html += '    .card {\n';
+  html += '      position: relative;\n';
+  html += '      z-index: 1;\n';
+  html += '      width: 100%;\n';
+  html += '      max-width: 440px;\n';
+  html += '      border-radius: 28px;\n';
+  html += '      background: linear-gradient(180deg, rgba(27, 28, 35, 0.72), rgba(22, 23, 29, 0.6));\n';
+  html += '      border: 1px solid rgba(255, 255, 255, 0.14);\n';
+  html += '      backdrop-filter: blur(28px);\n';
+  html += '      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);\n';
+  html += '      padding: 40px 36px;\n';
+  html += '    }\n';
+  html += '    .container { display: flex; flex-direction: column; align-items: center; text-align: center; }\n';
+  html += '    .icon-wrapper {\n';
+  html += '      width: 56px;\n';
+  html += '      height: 56px;\n';
+  html += '      border-radius: 16px;\n';
+  html += '      background: linear-gradient(150deg, rgba(217, 168, 78, 0.15), rgba(255, 106, 43, 0.15));\n';
+  html += '      display: flex;\n';
+  html += '      align-items: center;\n';
+  html += '      justify-content: center;\n';
+  html += '      margin-bottom: 16px;\n';
+  html += '    }\n';
+  html += '    .icon-wrapper svg { width: 28px; height: 28px; }\n';
+  html += '    h2 { font-size: 22px; font-weight: 600; margin: 0 0 4px; color: #eceef2; }\n';
+  html += '    .subtitle { font-size: 14px; color: #a3a5b0; margin: 0 0 24px; line-height: 1.5; }\n';
+  html += '    .error { width: 100%; padding: 12px 14px; margin-bottom: 16px; border-radius: 11px; background: rgba(239, 83, 80, 0.1); border: 1px solid rgba(239, 83, 80, 0.25); color: #ff8b87; font-size: 13px; text-align: left; display: flex; align-items: center; gap: 10px; }\n';
+  html += '    .error svg { flex-shrink: 0; width: 18px; height: 18px; }\n';
+  html += '    .form { width: 100%; }\n';
+  html += '    .form-group { margin-bottom: 14px; }\n';
+  html += '    .form-group label { display: block; font-size: 12px; font-weight: 600; color: #a3a5b0; text-align: left; margin-bottom: 5px; }\n';
+  html += '    .input { width: 100%; padding: 11px 14px; border-radius: 12px; background: #0e0f13; border: 1px solid rgba(255, 255, 255, 0.07); color: #eceef2; font-size: 14px; outline: none; box-shadow: inset 3px 3px 7px rgba(0, 0, 0, 0.5); transition: border-color 0.15s ease; }\n';
+  html += '    .input::placeholder { color: #62636e; }\n';
+  html += '    .input:focus { border-color: rgba(255, 106, 43, 0.45); }\n';
+  html += '    .password-hint { text-align: left; font-size: 12px; color: #62636e; margin-top: 4px; }\n';
+  html += '    .submit-btn { width: 100%; padding: 12px 0; border-radius: 12px; border: none; color: #17181e; font-size: 14px; font-weight: 700; background: linear-gradient(150deg, #d9a84e, #ff6a2b); cursor: pointer; box-shadow: 0 8px 20px rgba(255, 106, 43, 0.32); transition: transform 0.15s ease, opacity 0.15s ease; }\n';
+  html += '    .submit-btn:hover:not(:disabled) { transform: translateY(-1px); }\n';
+  html += '    .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }\n';
+  html += '    .close-btn { position: fixed; top: 12px; right: 16px; background: transparent; border: none; color: #62636e; font-size: 22px; cursor: pointer; z-index: 1000; padding: 4px 8px; border-radius: 6px; transition: color 0.15s ease; }\n';
+  html += '    .close-btn:hover { color: #eceef2; }\n';
+  html += '    @media (max-width: 480px) { .card { padding: 28px 20px; } h2 { font-size: 20px; } }\n';
+  html += '  </style>\n';
+  html += '</head>\n';
+  html += '<body>\n';
+  html += '  <div class="card">\n';
+  html += '    <div class="container">\n';
+  html += '      <div class="icon-wrapper">\n';
+  html += '        <svg viewBox="0 0 24 24" fill="none" stroke="#d9a84e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">\n';
+  html += '          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>\n';
+  html += '          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>\n';
+  html += '        </svg>\n';
+  html += '      </div>\n';
+  html += '      <h2>Set new password</h2>\n';
+  html += '      <p class="subtitle">Choose a strong password you have not used before.</p>\n';
+
+  if (errorMessage) {
+    html += '      <div class="error">\n';
+    html += '        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\n';
+    html += '          <circle cx="12" cy="12" r="10"/>\n';
+    html += '          <line x1="12" y1="8" x2="12" y2="12"/>\n';
+    html += '          <line x1="12" y1="16" x2="12.01" y2="16"/>\n';
+    html += '        </svg>\n';
+    html += '        ' + errorMessage + '\n';
+    html += '      </div>\n';
+  }
+
+  html += '      <form action="' + AUTH_BASE_URL + '/api/v1/auth/reset-password/html" method="POST" class="form">\n';
+  html += '        <input type="hidden" name="token" value="' + token + '" />\n';
+  html += '        <div class="form-group">\n';
+  html += '          <label for="password">New Password</label>\n';
+  html += '          <input type="password" id="password" name="password" class="input" placeholder="Enter new password" required minlength="8" autofocus />\n';
+  html += '          <div class="password-hint">Must be at least 8 characters</div>\n';
+  html += '        </div>\n';
+  html += '        <div class="form-group">\n';
+  html += '          <label for="confirmPassword">Confirm Password</label>\n';
+  html += '          <input type="password" id="confirmPassword" name="confirmPassword" class="input" placeholder="Confirm new password" required minlength="8" />\n';
+  html += '        </div>\n';
+  html += '        <button type="submit" class="submit-btn">Reset Password</button>\n';
+  html += '      </form>\n';
+  html += '    </div>\n';
+  html += '  </div>\n';
+  html += '  <script>\n';
+  html += '    if (window.opener) {\n';
+  html += '      const closeBtn = document.createElement("button");\n';
+  html += '      closeBtn.className = "close-btn";\n';
+  html += '      closeBtn.textContent = "×";\n';
+  html += '      closeBtn.onclick = function() { window.close(); };\n';
+  html += '      document.body.appendChild(closeBtn);\n';
+  html += '    }\n';
+  html += '  </script>\n';
+  html += '</body>\n';
+  html += '</html>';
+
+  res.send(html);
+};
+
+/**
+ * POST /auth/reset-password/html - Handle password reset form submission
+ */
+const resetPasswordSubmit = async (req, res) => {
+  const { token, password, confirmPassword } = req.body;
+
+  const errorRedirect = (code) =>
+    res.redirect(
+      `${AUTH_BASE_URL}/api/v1/auth/reset-password?token=${encodeURIComponent(token || '')}&error=${code}`
+    );
+
+  if (!token) {
+    return errorRedirect('invalid_token');
+  }
+
+  if (!password || !confirmPassword) {
+    return errorRedirect('missing_fields');
+  }
+
+  if (password.length < 8) {
+    return errorRedirect('weak_password');
+  }
+
+  if (password !== confirmPassword) {
+    return errorRedirect('password_mismatch');
+  }
+
+  try {
+    await authService.resetPassword(token, password, req);
+
+    // Render success page — no redirect to a product-specific URL
+    const successHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Password reset - KXBYTE</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+      background: #0e0f13;
+      color: #eceef2;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 20px;
+    }
+    .card {
+      width: 100%;
+      max-width: 440px;
+      border-radius: 28px;
+      background: linear-gradient(180deg, rgba(27, 28, 35, 0.72), rgba(22, 23, 29, 0.6));
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      backdrop-filter: blur(28px);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+      padding: 40px 36px;
+      text-align: center;
+    }
+    .check {
+      width: 56px; height: 56px; margin: 0 auto 16px;
+      border-radius: 16px;
+      background: linear-gradient(150deg, rgba(76, 175, 80, 0.2), rgba(76, 175, 80, 0.1));
+      display: flex; align-items: center; justify-content: center;
+    }
+    .check svg { width: 30px; height: 30px; }
+    h2 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+    p { font-size: 14px; color: #a3a5b0; line-height: 1.55; margin: 0 0 20px; }
+    .close-btn {
+      margin-top: 8px; padding: 12px 32px;
+      border-radius: 12px; border: none;
+      color: #17181e; font-size: 14px; font-weight: 700;
+      background: linear-gradient(150deg, #d9a84e, #ff6a2b);
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(255, 106, 43, 0.32);
+    }
+    .close-btn:hover { transform: translateY(-1px); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="check">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#4CAF50" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+    </div>
+    <h2>Password updated</h2>
+    <p>Your password has been changed. You can now sign in to any KXBYTE app with your new password.</p>
+    <button class="close-btn" onclick="window.close()">Close</button>
+  </div>
+  <script>
+    // Auto-close after 3s if opened as popup
+    if (window.opener) {
+      setTimeout(function() {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({ type: 'KXBYTE_PASSWORD_RESET_SUCCESS' }, '*');
+          window.close();
+        }
+      }, 3000);
+    }
+  </script>
+</body>
+</html>`;
+
+    res.send(successHtml);
+  } catch (err) {
+    console.error('Reset password error:', err.message);
+    return errorRedirect('invalid_token');
+  }
 };
 
 /**
@@ -799,8 +1096,11 @@ const revoke = async (req, res) => {
 export default {
   // Page renderers
   forgotPasswordPage,
+  forgotPasswordSubmit,
+  resetPasswordPage,
+  resetPasswordSubmit,
   registerPage,
-  
+
   // OAuth flow
   authorize,
   oauthLogin,
