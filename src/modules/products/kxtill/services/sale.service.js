@@ -165,6 +165,7 @@ const createSale = async (userId, organizationId, data) => {
   return saleDb.findSaleById(sale.id, organizationId);
 };
 
+
 const createOfflineSale = async (userId, organizationId, data) => {
   const {
     clientSaleId,
@@ -176,37 +177,26 @@ const createOfflineSale = async (userId, organizationId, data) => {
     paymentReference,
   } = data;
 
-  // Check if sale already exists (idempotency)
+  // ---- Idempotency guard #1: early return ----
   if (clientSaleId) {
     const existing = await saleDb.findSaleByClientId(clientSaleId);
     if (existing) {
-      return existing;
+      return saleDb.findSaleById(existing.id, organizationId);
     }
   }
 
-  // Validate organization and branch
   const organization = await orgDb.findOrganizationById(organizationId);
-  if (!organization) {
-    throw new Error('Organization not found');
-  }
+  if (!organization) throw new Error('Organization not found');
 
   const membership = await orgDb.findMembership(userId, organizationId);
-  if (!membership) {
-    throw new Error('You do not have access to this organization');
-  }
+  if (!membership) throw new Error('You do not have access to this organization');
 
   const branch = await branchDb.findBranchById(branchId, organizationId);
-  if (!branch) {
-    throw new Error('Branch not found');
-  }
+  if (!branch) throw new Error('Branch not found');
 
-  // Check permission
   const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.create');
-  if (!hasPermission) {
-    throw new Error('You do not have permission to create sales');
-  }
+  if (!hasPermission) throw new Error('You do not have permission to create sales');
 
-  // ✅ Validate customer if provided
   let customer = null;
   if (customerId) {
     const customerService = await import('../../../platform/customers/index.js');
@@ -215,25 +205,20 @@ const createOfflineSale = async (userId, organizationId, data) => {
 
   const reference = generateReference();
 
+  // ---- Pre-validate + compute everything before touching stock ----
+  const preparedItems = [];
   let subtotal = 0;
   let taxAmount = 0;
-  const saleItems = [];
 
   for (const item of data.items) {
     const product = await productDb.findProductById(item.productId, organizationId);
-    if (!product) {
-      throw new Error(`Product ${item.productId} not found`);
-    }
+    if (!product) throw new Error(`Product ${item.productId} not found`);
 
     const branchProduct = await productDb.findBranchProductById(item.branchProductId, organizationId);
-    if (!branchProduct) {
-      throw new Error(`Branch product ${item.branchProductId} not found`);
-    }
+    if (!branchProduct) throw new Error(`Branch product ${item.branchProductId} not found`);
 
     const unit = await productDb.findUnitById(item.unitId, item.productId);
-    if (!unit) {
-      throw new Error(`Unit ${item.unitId} not found`);
-    }
+    if (!unit) throw new Error(`Unit ${item.unitId} not found`);
 
     const quantity = Number(item.quantity);
     const conversionQty = Number(unit.conversionQty);
@@ -253,50 +238,83 @@ const createOfflineSale = async (userId, organizationId, data) => {
     subtotal += total;
     taxAmount += tax;
 
-    saleItems.push({
-      productId: product.id,
-      unitId: unit.id,
-      branchProductId: branchProduct.id,
-      unitName: unit.name,
-      unitAbbrev: unit.abbreviation,
-      unitType: unit.unitType,
-      quantity: quantity,
-      conversionQty: conversionQty,
-      unitPrice: unitPrice,
-      baseQuantity: baseQuantity,
-      taxRate: Number(product.taxRate),
-      taxAmount: tax,
-      discount: 0,
-      total: total + tax,
+    preparedItems.push({
+      product,
+      branchProduct,
+      unit,
+      quantity,
+      conversionQty,
+      baseQuantity,
+      unitPrice,
+      tax,
+      total,
+      trackInventory: !!product.trackInventory,
     });
-
-    if (product.trackInventory) {
-      await productDb.updateStock(branchProduct.id, -baseQuantity);
-    }
   }
 
   const totalAmount = subtotal + taxAmount;
 
-  const sale = await saleDb.createSale({
-    organizationId,
-    userId,
-    branchId,
-    clientSaleId: clientSaleId || null,
-    customerId: customer?.id || null,
-    customerName: customer?.name || customerName || null,
-    reference: reference,
-    subtotal,
-    taxAmount,
-    discount: 0,
-    totalAmount,
-    status: 'COMPLETED',
-    paymentStatus: 'PAID',
-  });
+  // ---- Idempotency guard #2: re-check right before create ----
+  if (clientSaleId) {
+    const existing = await saleDb.findSaleByClientId(clientSaleId);
+    if (existing) {
+      return saleDb.findSaleById(existing.id, organizationId);
+    }
+  }
 
-  for (const item of saleItems) {
+  // ---- Create the sale ----
+  let sale;
+  try {
+    sale = await saleDb.createSale({
+      organizationId,
+      userId,
+      branchId,
+      clientSaleId: clientSaleId || null,
+      customerId: customer?.id || null,
+      customerName: customer?.name || customerName || null,
+      reference,
+      subtotal,
+      taxAmount,
+      discount: 0,
+      totalAmount,
+      status: 'COMPLETED',
+      paymentStatus: 'PAID',
+    });
+  } catch (err) {
+    // Race: another request created it between our check and our create.
+    if (err.code === 'P2002' && clientSaleId) {
+      const existing = await saleDb.findSaleByClientId(clientSaleId);
+      if (existing) {
+        return saleDb.findSaleById(existing.id, organizationId);
+      }
+    }
+    throw err;
+  }
+
+  // ---- Decrement stock + persist items ----
+  // Only after the sale row is safely created. If anything below fails,
+  // the sale exists and stock has moved — no orphan decrements.
+  for (const p of preparedItems) {
+    if (p.trackInventory) {
+      await productDb.updateStock(p.branchProduct.id, -p.baseQuantity);
+    }
+
     await saleDb.createSaleItem({
-      ...item,
       saleId: sale.id,
+      productId: p.product.id,
+      unitId: p.unit.id,
+      branchProductId: p.branchProduct.id,
+      unitName: p.unit.name,
+      unitAbbrev: p.unit.abbreviation,
+      unitType: p.unit.unitType,
+      quantity: p.quantity,
+      conversionQty: p.conversionQty,
+      unitPrice: p.unitPrice,
+      baseQuantity: p.baseQuantity,
+      taxRate: Number(p.product.taxRate),
+      taxAmount: p.tax,
+      discount: 0,
+      total: p.total + p.tax,
     });
   }
 
@@ -319,7 +337,7 @@ const createOfflineSale = async (userId, organizationId, data) => {
       clientSaleId,
       reference,
       total: totalAmount,
-      items: saleItems.length,
+      items: preparedItems.length,
       customerId: customer?.id || null,
       customerName: customer?.name || customerName || null,
     },

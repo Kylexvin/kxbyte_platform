@@ -14,6 +14,7 @@ const getNotifications = async (req, res) => {
       type,
       channel,
       isRead,
+      productKey,
       limit = 50,
       offset = 0,
     } = req.query;
@@ -23,6 +24,7 @@ const getNotifications = async (req, res) => {
       type,
       channel,
       isRead: isRead === 'true' ? true : isRead === 'false' ? false : undefined,
+      productKey,
       limit: parseInt(limit, 10),
       offset: parseInt(offset, 10),
     };
@@ -101,7 +103,8 @@ const getUnreadCount = async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const count = await notificationService.getUnreadCount(userId);
+    const { productKey } = req.query;
+    const count = await notificationService.getUnreadCount(userId, productKey);
     res.status(200).json({ unreadCount: count });
   } catch (error) {
     console.error('Get unread count error:', error);

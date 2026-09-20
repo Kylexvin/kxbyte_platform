@@ -25,6 +25,7 @@ const findNotificationsByUser = async (userId, filters = {}) => {
     type,
     channel,
     isRead,
+    productKey,
     limit = 50,
     offset = 0,
   } = filters;
@@ -34,6 +35,7 @@ const findNotificationsByUser = async (userId, filters = {}) => {
   if (type) where.type = type;
   if (channel) where.channel = channel;
   if (isRead !== undefined) where.isRead = isRead;
+  if (productKey) where.productKey = productKey;
 
   const [items, total] = await Promise.all([
     prisma.notification.findMany({
@@ -43,11 +45,7 @@ const findNotificationsByUser = async (userId, filters = {}) => {
       take: limit,
       include: {
         organization: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-          },
+          select: { id: true, name: true, slug: true },
         },
       },
     }),
@@ -89,11 +87,12 @@ const markAllAsRead = async (userId) => {
   });
 };
 
-const countUnread = async (userId) => {
+const countUnread = async (userId, productKey) => {
   return prisma.notification.count({
     where: {
       userId,
       readAt: null,
+      ...(productKey && { productKey }),
     },
   });
 };

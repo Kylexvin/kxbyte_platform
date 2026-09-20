@@ -8,10 +8,13 @@ const router = express.Router();
 
 router.use(authMiddleware.authenticate);
 
+// Static routes FIRST
 router.get('/', notificationController.getNotifications);
 router.get('/unread/count', notificationController.getUnreadCount);
+router.patch('/read/all', notificationController.markAllAsRead);
+
+// Dynamic routes LAST
 router.get('/:notificationId', notificationController.getNotification);
 router.patch('/:notificationId/read', notificationController.markAsRead);
-router.patch('/read/all', notificationController.markAllAsRead);
 
 export default router;

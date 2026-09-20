@@ -88,13 +88,19 @@ const requireActiveSubscription = (productKey) => {
         return next();
       }
 
-      // EXPIRED / SUSPENDED / CANCELLED: block everything
+     
+      // EXPIRED: reads pass, writes block
       if (status.status === 'EXPIRED') {
-        return res.status(403).json({
-          error: 'Subscription has expired. Please renew.',
-          code: 'SUBSCRIPTION_EXPIRED',
-          expiredAt: status.expiredAt,
-        });
+        const action = inferAction(req);
+        if (action === 'write') {
+          return res.status(403).json({
+            error: 'Subscription has expired. Please renew.',
+            code: 'SUBSCRIPTION_EXPIRED',
+            expiredAt: status.expiredAt,
+          });
+        }
+        req.subscription = status;
+        return next();
       }
 
       if (status.status === 'CANCELLED') {

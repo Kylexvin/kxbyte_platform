@@ -111,7 +111,7 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
     ];
   }
 
-  const [items, total] = await Promise.all([
+  const [items, total, aggregate, customerGroups] = await Promise.all([
     prisma.kxTillSale.findMany({
       where,
       include: {
@@ -156,13 +156,31 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
             code: true,
           },
         },
-        customer: true, // ✅ Add this
+        customer: true,
       },
       orderBy: { createdAt: 'desc' },
       skip: offset,
       take: limit,
     }),
+
     prisma.kxTillSale.count({ where }),
+
+    prisma.kxTillSale.aggregate({
+      where,
+      _sum: {
+        totalAmount: true,
+        subtotal: true,
+        taxAmount: true,
+        discount: true,
+      },
+      _avg: { totalAmount: true },
+    }),
+
+    prisma.kxTillSale.groupBy({
+      by: ['customerName'],
+      where,
+      _count: { _all: true },
+    }),
   ]);
 
   const mappedItems = items.map(sale => ({
@@ -190,11 +208,22 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
     updatedAt: sale.updatedAt,
   }));
 
+  const totals = {
+    salesCount: total,
+    revenue: Number(aggregate._sum.totalAmount || 0),
+    subtotal: Number(aggregate._sum.subtotal || 0),
+    taxAmount: Number(aggregate._sum.taxAmount || 0),
+    discount: Number(aggregate._sum.discount || 0),
+    averageOrderValue: Number(aggregate._avg.totalAmount || 0),
+    uniqueCustomers: customerGroups.length,
+  };
+
   return { 
     items: mappedItems, 
     total, 
     limit, 
-    offset 
+    offset,
+    totals,
   };
 };
 

@@ -73,8 +73,8 @@ const markAllAsRead = async (userId) => {
   return notificationDb.markAllAsRead(userId);
 };
 
-const getUnreadCount = async (userId) => {
-  return notificationDb.countUnread(userId);
+const getUnreadCount = async (userId, productKey) => {
+  return notificationDb.countUnread(userId, productKey);
 };
 
 export default {
