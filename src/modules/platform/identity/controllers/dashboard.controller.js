@@ -91,7 +91,14 @@ const getDashboardContext = async (req, res) => {
       })
     );
 
-
+    // 7. Low stock count
+    const lowStockCount = await prisma.kxTillBranchProduct.count({
+      where: {
+        branchId: { in: branches.map(b => b.id) },
+        stock: { lte: prisma.kxTillBranchProduct.fields.minStock },
+        isAvailable: true,
+      },
+    });
 
     res.status(200).json({
       user: userWithoutPassword,
