@@ -49,7 +49,8 @@ const reactivateSubscription = async (organizationId, productKey) => {
 };
 
 const listAllProducts = async () => {
-  return productDb.findAllProducts();
+  const products = await productDb.findAllProducts();
+  return products.filter((p) => p.key !== 'admin');
 };
 
 const getProductByKey = async (key) => {
