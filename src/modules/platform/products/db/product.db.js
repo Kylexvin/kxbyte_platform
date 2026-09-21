@@ -2,9 +2,13 @@
 
 import prisma from '../../../../database/postgres/prisma.js';
 
+
 const findAllProducts = async () => {
   return prisma.product.findMany({
-    where: { isActive: true },
+    where: {
+      isActive: true,
+      key: { not: 'admin' },
+    },
     orderBy: { name: 'asc' },
   });
 };
