@@ -4,6 +4,7 @@ import passport from '../config/passport.config.js';
 import socialService from '../services/social.service.js';
 import authDb from '../db/auth.db.js';
 import authCodeStore from '../utils/authCodeStore.js';
+import jwt from '../utils/jwt.js';
 
 const VALID_CLIENTS = ['kxtill', 'kxinvoice', 'kxcrm', 'kxsuite'];
 
@@ -13,6 +14,15 @@ const ALLOWED_REDIRECTS = {
   kxcrm: process.env.KXCRM_REDIRECT_URI || 'http://localhost:3000/kx/kxcrm/oauth/callback',
   kxsuite: process.env.KXSUITE_REDIRECT_URI || 'http://localhost:3000/dashboard/oauth/callback',
 };
+
+// ============================================================
+// DIRECT FLOW (KxSuite itself — no client_id/redirect_uri)
+// ============================================================
+
+const KXSUITE_FRONTEND_URL =
+  process.env.KXSUITE_FRONTEND_URL || 'http://localhost:3000';
+
+export const DIRECT_FLOW_MARKER = 'direct:suite';
 
 const encodeOAuthState = (client_id, redirect_uri, state) =>
   Buffer.from(JSON.stringify({ client_id, redirect_uri, state: state || '' })).toString('base64url');
@@ -24,6 +34,10 @@ const decodeOAuthState = (encoded) => {
     return null;
   }
 };
+
+// ============================================================
+// CLIENT FLOW (KxTill and other apps)
+// ============================================================
 
 const googleAuth = (req, res, next) => {
   const { client_id, redirect_uri, state } = req.query;
@@ -83,6 +97,58 @@ const socialCallback = async (req, res) => {
     res.redirect(`${redirect_uri}?error=social_auth_failed${state ? `&state=${state}` : ''}`);
   }
 };
+
+// ============================================================
+// DIRECT FLOW (KxSuite — no client system)
+// ============================================================
+
+const googleAuthDirect = (req, res, next) => {
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    session: false,
+    state: DIRECT_FLOW_MARKER,
+  })(req, res, next);
+};
+
+const githubAuthDirect = (req, res, next) => {
+  passport.authenticate('github', {
+    scope: ['user:email'],
+    session: false,
+    state: DIRECT_FLOW_MARKER,
+  })(req, res, next);
+};
+
+const socialCallbackDirect = async (req, res) => {
+  try {
+    const { user } = req;
+
+    if (!user) {
+      console.error('Direct social callback: No user found in request');
+      return res.redirect(`${KXSUITE_FRONTEND_URL}/login?error=social_auth_failed`);
+    }
+
+    const accessToken = jwt.generateAccessToken(user);
+    const refreshToken = jwt.generateRefreshToken(user);
+
+    await authDb.createSession({
+      userId: user.id,
+      refreshToken,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    console.log(`Direct social callback: ${user.email} → ${KXSUITE_FRONTEND_URL}/callback`);
+    res.redirect(
+      `${KXSUITE_FRONTEND_URL}/callback?accessToken=${accessToken}&refreshToken=${refreshToken}`
+    );
+  } catch (error) {
+    console.error('Direct social callback error:', error);
+    res.redirect(`${KXSUITE_FRONTEND_URL}/login?error=social_auth_failed`);
+  }
+};
+
+// ============================================================
+// SOCIAL ACCOUNT MANAGEMENT
+// ============================================================
 
 const linkSocialAccount = async (req, res) => {
   try {
@@ -154,9 +220,17 @@ const getSocialAccounts = async (req, res) => {
 };
 
 export default {
+  // Client flow (KxTill and other apps)
   googleAuth,
   githubAuth,
   socialCallback,
+
+  // Direct flow (KxSuite itself)
+  googleAuthDirect,
+  githubAuthDirect,
+  socialCallbackDirect,
+
+  // Account management
   linkSocialAccount,
   unlinkSocialAccount,
   getSocialAccounts,

@@ -64,25 +64,41 @@ router.post('/logout-all', authMiddleware.authenticate, authController.logoutAll
 // SOCIAL AUTH
 // ============================================================
 
+// Client flow (KxTill and other apps — requires client_id + redirect_uri)
 router.get('/google', socialAuthLimiter, socialController.googleAuth);
 router.get('/github', socialAuthLimiter, socialController.githubAuth);
 
+// Direct flow (KxSuite itself — no client system)
+router.get('/google/direct', socialAuthLimiter, socialController.googleAuthDirect);
+router.get('/github/direct', socialAuthLimiter, socialController.githubAuthDirect);
+
+// Shared callbacks — branch on state to decide which flow
 router.get(
   '/google/callback',
   passport.authenticate('google', {
     session: false,
-    failureRedirect: '/login?error=google_failed',
+    failureRedirect: `${process.env.KXSUITE_FRONTEND_URL || 'http://localhost:3000'}/login?error=google_failed`,
   }),
-  socialController.socialCallback
+  (req, res, next) => {
+    if (req.query.state === 'direct:suite') {
+      return socialController.socialCallbackDirect(req, res);
+    }
+    return socialController.socialCallback(req, res);
+  }
 );
 
 router.get(
   '/github/callback',
   passport.authenticate('github', {
     session: false,
-    failureRedirect: '/login?error=github_failed',
+    failureRedirect: `${process.env.KXSUITE_FRONTEND_URL || 'http://localhost:3000'}/login?error=github_failed`,
   }),
-  socialController.socialCallback
+  (req, res, next) => {
+    if (req.query.state === 'direct:suite') {
+      return socialController.socialCallbackDirect(req, res);
+    }
+    return socialController.socialCallback(req, res);
+  }
 );
 
 // ============================================================
