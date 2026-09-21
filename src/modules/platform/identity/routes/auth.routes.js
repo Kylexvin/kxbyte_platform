@@ -7,6 +7,7 @@ import dashboardController from '../controllers/dashboard.controller.js';
 import socialController from '../controllers/social.controller.js';
 import passport from '../config/passport.config.js';
 import oauthController from '../controllers/oauth.controller.js';
+import ssoController from '../controllers/sso.controller.js';
 import {
   loginLimiter,
   registerLimiter,
@@ -25,6 +26,12 @@ router.get('/oauth/authorize', oauthController.authorize);
 router.post('/oauth/login', oauthController.oauthLogin);
 router.post('/oauth/token', oauthController.token);
 router.post('/oauth/revoke', oauthController.revoke);
+
+// ============================================================
+// SSO (app-to-app single sign-on)
+// ============================================================
+router.post('/sso/mint', authMiddleware.authenticate, ssoController.mintCode);
+router.post('/sso/exchange', ssoController.exchangeCode);
 
 // ============================================================
 // PAGE RENDERERS (HTML) - Using oauthController
