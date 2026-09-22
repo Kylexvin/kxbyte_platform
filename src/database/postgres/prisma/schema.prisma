@@ -208,6 +208,19 @@ model OrganizationProduct {
   @@map("organization_products")
 }
 
+model TrialBurn {
+  id             String   @id @default(uuid())
+  ownerUserId    String
+  productKey     String
+  organizationId String
+  burnedAt       DateTime @default(now())
+
+  @@unique([ownerUserId, productKey])
+  @@index([productKey])
+  @@index([organizationId])
+  @@map("trial_burns")
+}
+
 // ============================================================
 // AUTHORIZATION
 // ============================================================

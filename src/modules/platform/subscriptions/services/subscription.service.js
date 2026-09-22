@@ -1,5 +1,6 @@
 // src/modules/platform/subscriptions/services/subscription.service.js
 
+import prisma from '../../../../database/postgres/prisma.js';
 import subscriptionDb from '../db/subscription.db.js';
 import notificationDb from '../../notifications/db/notification.db.js';
 import planDb from '../db/plan.db.js';
@@ -20,6 +21,80 @@ const SUBSCRIPTION_STATUS = {
 const GRACE_DAYS = 2;
 
 const REMINDER_THRESHOLDS = [7, 3, 1];
+// ============================================================
+// TRIAL BURN TRACKING
+// ============================================================
+
+const isTrialBurned = async (ownerUserId, productKey) => {
+  const burn = await prisma.trialBurn.findUnique({
+    where: {
+      ownerUserId_productKey: { ownerUserId, productKey },
+    },
+  });
+  return !!burn;
+};
+
+const markTrialBurned = async (ownerUserId, productKey, organizationId) => {
+  try {
+    await prisma.trialBurn.create({
+      data: { ownerUserId, productKey, organizationId },
+    });
+  } catch (err) {
+    // P2002 = unique constraint violated → already burned, safe to ignore
+    if (err.code !== 'P2002') throw err;
+  }
+}; 
+
+// ============================================================
+// SUBSCRIPTION CREATION — NO TRIAL (trial already burned)
+// ============================================================
+
+const createSubscriptionWithoutTrial = async (organizationId, productKey, planKey) => {
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (!organization) {
+    throw new Error('Organization not found');
+  }
+
+  const plan = await planDb.findPlanByKey(productKey, planKey);
+  if (!plan) {
+    throw new Error('Plan not found');
+  }
+
+  const existing = await subscriptionDb.findSubscription(organizationId, productKey);
+  if (existing) {
+    throw new Error('Subscription already exists for this product');
+  }
+
+  const now = new Date();
+
+  const subscription = await subscriptionDb.createSubscription({
+    organizationId,
+    productKey,
+    planId: plan.id,
+    status: 'EXPIRED',
+    expiredAt: now,
+    trialStart: null,
+    trialEnd: null,
+    currentPeriodStart: null,
+    currentPeriodEnd: null,
+  });
+
+  await audit.log({
+    organizationId,
+    userId: null,
+    action: 'SUBSCRIPTION_CREATED_NO_TRIAL',
+    resource: 'subscription',
+    resourceId: subscription.id,
+    metadata: {
+      productKey,
+      planKey: plan.key,
+      reason: 'owner_trial_burned',
+    },
+  });
+
+  return subscription;
+};
+
 // ============================================================
 // CRON SWEEP — daily
 // ============================================================
@@ -714,5 +789,8 @@ export default {
   adminSuspend,
   getPaymentHistory,
   adminListAll,
-  adminExtendTrial
+  adminExtendTrial,
+  isTrialBurned,
+  markTrialBurned,
+  createSubscriptionWithoutTrial,
 };

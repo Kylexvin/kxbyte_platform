@@ -9,18 +9,61 @@ import audit from '../../audit/index.js';
 import { addDays } from 'date-fns';
 
 const createSubscriptionForProduct = async (organizationId, productKey) => {
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (!organization) {
+    throw new Error('Organization not found');
+  }
+
   const plans = await planDb.findPlansByProduct(productKey);
   if (!plans || plans.length === 0) {
     throw new Error(`No active plans registered for product ${productKey}`);
   }
 
-  // Plans come ordered by price ASC from planDb.findPlansByProduct.
-  // First active plan is the default. Products may define more later.
+  // Plans come ordered by price ASC. First active plan is the default.
   const defaultPlan = plans[0];
 
+  const trialBurned = await subscriptionService.isTrialBurned(
+    organization.ownerId,
+    productKey
+  );
+
+  if (trialBurned) {
+    try {
+      await subscriptionService.createSubscriptionWithoutTrial(
+        organizationId,
+        productKey,
+        defaultPlan.key
+      );
+      console.log(
+        `Subscription created for ${productKey} (NO TRIAL — owner already burned trial, plan=${defaultPlan.key})`
+      );
+    } catch (error) {
+      if (error.message === 'Subscription already exists for this product') {
+        console.log(`Subscription already exists for ${productKey}`);
+        return;
+      }
+      throw error;
+    }
+    return;
+  }
+
+  // First-ever activation for this owner+product: grant the trial.
   try {
-    await subscriptionService.createSubscription(organizationId, productKey, defaultPlan.key);
-    console.log(`Subscription created for ${productKey} (plan=${defaultPlan.key}, trialDays=${defaultPlan.trialDays})`);
+    await subscriptionService.createSubscription(
+      organizationId,
+      productKey,
+      defaultPlan.key
+    );
+    console.log(
+      `Subscription created for ${productKey} (TRIAL, plan=${defaultPlan.key}, trialDays=${defaultPlan.trialDays})`
+    );
+
+    await subscriptionService.markTrialBurned(
+      organization.ownerId,
+      productKey,
+      organizationId
+    );
+    console.log(`Trial burned for owner ${organization.ownerId} on ${productKey}`);
   } catch (error) {
     if (error.message === 'Subscription already exists for this product') {
       console.log(`Subscription already exists for ${productKey}`);
@@ -39,12 +82,35 @@ const reactivateSubscription = async (organizationId, productKey) => {
   }
 
   if (subscription.status === 'CANCELLED' || subscription.status === 'EXPIRED') {
+    const organization = await orgDb.findOrganizationById(organizationId);
+    const trialBurned = await subscriptionService.isTrialBurned(
+      organization.ownerId,
+      productKey
+    );
+
+    if (trialBurned) {
+      // No trial. Force EXPIRED so they must pay to reactivate.
+      await subscriptionDb.updateSubscription(subscription.id, {
+        status: 'EXPIRED',
+        expiredAt: new Date(),
+        trialStart: null,
+        trialEnd: null,
+        cancelledAt: null,
+      });
+      console.log(`Subscription reactivated as EXPIRED for ${productKey} (no trial — burned)`);
+      return;
+    }
+
+    // Should not happen — trial burn is always written on first activation.
+    // Defensive: treat as no-trial.
     await subscriptionDb.updateSubscription(subscription.id, {
-      status: 'ACTIVE',
+      status: 'EXPIRED',
+      expiredAt: new Date(),
+      trialStart: null,
+      trialEnd: null,
       cancelledAt: null,
-      expiredAt: null,
     });
-    console.log(`Subscription reactivated for ${productKey}`);
+    console.log(`Subscription reactivated as EXPIRED for ${productKey} (trial missing, defensive)`);
   }
 };
 
