@@ -45,6 +45,18 @@ const markTrialBurned = async (ownerUserId, productKey, organizationId) => {
   }
 }; 
 
+const getTrialBurnsForOrgOwner = async (organizationId) => {
+  const org = await orgDb.findOrganizationById(organizationId);
+  if (!org) throw new Error('Organization not found');
+
+  const burns = await prisma.trialBurn.findMany({
+    where: { ownerUserId: org.ownerId },
+    select: { productKey: true, burnedAt: true },
+    orderBy: { burnedAt: 'asc' },
+  });
+  return burns;
+};
+
 // ============================================================
 // SUBSCRIPTION CREATION — NO TRIAL (trial already burned)
 // ============================================================
@@ -792,5 +804,6 @@ export default {
   adminExtendTrial,
   isTrialBurned,
   markTrialBurned,
+  getTrialBurnsForOrgOwner,
   createSubscriptionWithoutTrial,
 };

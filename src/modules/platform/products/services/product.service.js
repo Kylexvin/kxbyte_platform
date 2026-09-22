@@ -147,28 +147,54 @@ const getOrganizationProducts = async (organizationId, userId) => {
 };
 
 const activateProduct = async (organizationId, userId, productKey) => {
+  if (productKey === 'admin') {
+    throw new Error('Cannot activate internal platform product');
+  }
+
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
-  } 
+  }
 
   const product = await productDb.findProductByKey(productKey);
   if (!product) {
     throw new Error('Product not found');
   }
 
-  // Check if already activated - skip owner check if active
   const existing = await productDb.findOrganizationProduct(organizationId, product.id);
-  
-  if (existing && existing.isActive) {
-    // Already active - return existing for any user
+
+  // Helper: build the enriched response
+  const buildResponse = async () => {
+    const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
     return {
       organizationId,
       productKey: product.key,
       productName: product.name,
-      activatedAt: existing.activatedAt,
+      activatedAt: existing?.activatedAt || new Date(),
       isActive: true,
+      subscriptionStatus: subscription?.status || null,
+      trialEnd: subscription?.trialEnd || null,
+      currentPeriodEnd: subscription?.currentPeriodEnd || null,
+      remainingDays: subscription
+        ? Math.max(
+            0,
+            Math.ceil(
+              (new Date(
+                subscription.status === 'TRIAL'
+                  ? subscription.trialEnd
+                  : subscription.status === 'GRACE'
+                  ? subscription.graceEnd
+                  : subscription.currentPeriodEnd
+              ).getTime() - Date.now()) / 86400000
+            )
+          )
+        : null,
     };
+  };
+
+  // Already active — return for any user
+  if (existing && existing.isActive) {
+    return await buildResponse();
   }
 
   // Only owner can activate if not already active
@@ -176,54 +202,31 @@ const activateProduct = async (organizationId, userId, productKey) => {
     throw new Error('Only the organization owner can activate products');
   }
 
-  let result;
-
   if (existing) {
-    // Reactivate (existing but inactive)
+    // Reactivate
     await productDb.updateOrganizationProduct(organizationId, product.id, { isActive: true });
     await reactivateSubscription(organizationId, productKey);
-
-    result = {
-      organizationId,
-      productKey: product.key,
-      productName: product.name,
-      activatedAt: new Date(),
-      isActive: true,
-    };
   } else {
     // New activation
-    const orgProduct = await productDb.createOrganizationProduct({
+    await productDb.createOrganizationProduct({
       organizationId,
       productId: product.id,
       activatedAt: new Date(),
       isActive: true,
     });
-
     await createSubscriptionForProduct(organizationId, productKey);
-
-    result = {
-      organizationId,
-      productKey: product.key,
-      productName: product.name,
-      activatedAt: orgProduct.activatedAt,
-      isActive: orgProduct.isActive,
-    };
   }
 
-  // Audit log: Product activated
   await audit.log({
     organizationId: organization.id,
     userId: userId,
     action: 'PRODUCT_ACTIVATED',
     resource: 'product',
     resourceId: product.id,
-    metadata: {
-      productKey: product.key,
-      productName: product.name,
-    },
+    metadata: { productKey: product.key, productName: product.name },
   });
 
-  return result;
+  return await buildResponse();
 };
 
 const deactivateProduct = async (organizationId, userId, productKey) => {
