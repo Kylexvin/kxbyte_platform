@@ -23,8 +23,14 @@ const registerPermissions = async (productKey, permissions) => {
   return results;
 };
 
+// Public list — excludes internal admin product
 const listAllPermissions = async () => {
   return permissionDb.findAllPermissions();
+};
+
+// Internal use only — includes admin product (KxOS role management)
+const listAllPermissionsIncludingInternal = async () => {
+  return permissionDb.findAllPermissionsIncludingInternal();
 };
 
 const listPermissionsByProduct = async (productKey) => {
@@ -46,6 +52,7 @@ const deletePermission = async (key) => {
 export default {
   registerPermissions,
   listAllPermissions,
+  listAllPermissionsIncludingInternal,
   listPermissionsByProduct,
   getPermissionByKey,
   deletePermission,

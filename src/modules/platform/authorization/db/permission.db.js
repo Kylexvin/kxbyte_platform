@@ -42,7 +42,22 @@ const findPermissionsByProduct = async (productKey) => {
   });
 };
 
+// Public list — excludes internal admin product
 const findAllPermissions = async () => {
+  return prisma.permission.findMany({
+    where: {
+      isActive: true,
+      productKey: { not: 'admin' },
+    },
+    orderBy: [
+      { productKey: 'asc' },
+      { key: 'asc' },
+    ],
+  });
+};
+
+// Internal use only — includes admin product
+const findAllPermissionsIncludingInternal = async () => {
   return prisma.permission.findMany({
     where: { isActive: true },
     orderBy: [
@@ -99,16 +114,19 @@ const findPermissionsByUser = async (userId, organizationId) => {
     return [];
   }
 
-  // If user has all branches, they might have special permissions
-  // Check if user has '* permission
+  // Check if user has '*' wildcard
   const hasWildcard = membership.role.permissions.some(
     (rp) => rp.permission.key === '*'
   );
 
   if (hasWildcard) {
-    // Return all permissions for the product
+    // Return all permissions for the product — excluding internal
     const allPermissions = await prisma.permission.findMany({
-      where: { productKey: 'kxtill', isActive: true },
+      where: {
+        productKey: 'kxtill',
+        isActive: true,
+        NOT: { productKey: 'admin' },
+      },
     });
     return allPermissions;
   }
@@ -116,14 +134,13 @@ const findPermissionsByUser = async (userId, organizationId) => {
   return membership.role.permissions.map((rp) => rp.permission);
 };
 
-
-
 export default {
   createPermission,
   createManyPermissions,
   findPermissionByKey,
   findPermissionsByProduct,
   findAllPermissions,
+  findAllPermissionsIncludingInternal,
   findPermissionsByKeys,
   deletePermission,
   findPermissionById,
