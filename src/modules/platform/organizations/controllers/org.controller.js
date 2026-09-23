@@ -212,6 +212,18 @@ const removeMember = async (req, res) => {
     ) {
       return res.status(400).json({ error: error.message });
     }
+    if (
+      error.message ===
+      'The organization owner cannot be removed. Transfer ownership first.'
+    ) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (
+      error.message ===
+      'You do not have permission to remove this member'
+    ) {
+      return res.status(403).json({ error: error.message });
+    }
     if (error.message === 'Member not found in this organization') {
       return res.status(404).json({ error: error.message });
     }
