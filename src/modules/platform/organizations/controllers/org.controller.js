@@ -2,6 +2,7 @@
 
 import orgService from '../services/org.service.js';
 import orgValidator from '../validators/org.validator.js';
+import authorizationService from '../../authorization/services/authorization.service.js';
 import orgDb from '../db/org.db.js';
 import audit from '../../audit/index.js';
 
@@ -186,16 +187,29 @@ const removeMember = async (req, res) => {
     }
 
     const { id, memberId } = req.params;
+
+    // ---- Permission gate ----
+    const hasPermission = await authorizationService.checkPermission(
+      userId,
+      id,
+      'members.manage'
+    );
+    if (!hasPermission) {
+      return res
+        .status(403)
+        .json({ error: 'You do not have permission to remove members' });
+    }
+
     const result = await orgService.removeMember(id, userId, memberId);
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'Organization not found') {
       return res.status(404).json({ error: error.message });
     }
-    if (error.message === 'Only the organization owner can remove members') {
-      return res.status(403).json({ error: error.message });
-    }
-    if (error.message === 'Organization owner cannot remove themselves. Transfer ownership first.') {
+    if (
+      error.message ===
+      'Organization owner cannot remove themselves. Transfer ownership first.'
+    ) {
       return res.status(400).json({ error: error.message });
     }
     if (error.message === 'Member not found in this organization') {

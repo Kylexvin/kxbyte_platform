@@ -292,12 +292,20 @@ const removeMember = async (organizationId, userId, memberId) => {
     throw new Error('Organization not found');
   }
 
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can remove members');
+  // ---- Cannot remove yourself ----
+  if (userId === memberId) {
+    throw new Error(
+      'Organization owner cannot remove themselves. Transfer ownership first.'
+    );
   }
 
-  if (userId === memberId) {
-    throw new Error('Organization owner cannot remove themselves. Transfer ownership first.');
+  // ---- Cannot remove the org owner ----
+  // The owner's membership is tied to the org. Only a transfer-of-ownership
+  // flow should change that, not a member-removal call.
+  if (organization.ownerId === memberId) {
+    throw new Error(
+      'The organization owner cannot be removed. Transfer ownership first.'
+    );
   }
 
   const membership = await orgDb.findMembership(memberId, organizationId);
@@ -305,9 +313,43 @@ const removeMember = async (organizationId, userId, memberId) => {
     throw new Error('Member not found in this organization');
   }
 
+  // ---- Escalation guard ----
+  // If the caller is not the org owner, they cannot remove a member whose
+  // role has permissions the caller does not have. This prevents a manager
+  // with `members.manage` from kicking out another manager or higher.
+  const isOwner = organization.ownerId === userId;
+  if (!isOwner) {
+    const callerPerms = new Set(
+      await authorizationService.getAllUserPermissions(userId, organizationId)
+    );
+
+    if (membership.roleId) {
+      const targetRole = await roleDb.findRoleById(membership.roleId);
+      if (targetRole) {
+        const targetKeys = (targetRole.permissions ?? []).map((rp) =>
+          rp.permission ? rp.permission.key : rp.key
+        );
+
+        // Wildcard target → admin-tier, only owner can remove
+        if (targetKeys.includes('*')) {
+          throw new Error(
+            'You do not have permission to remove this member'
+          );
+        }
+
+        // Any target permission the caller lacks → blocked
+        const hasEscalation = targetKeys.some((k) => !callerPerms.has(k));
+        if (hasEscalation) {
+          throw new Error(
+            'You do not have permission to remove this member'
+          );
+        }
+      }
+    }
+  }
+
   await orgDb.deleteMembership(membership.id);
 
-  // Audit log: Member removed
   await audit.log({
     organizationId: organization.id,
     userId: userId,
@@ -316,6 +358,7 @@ const removeMember = async (organizationId, userId, memberId) => {
     resourceId: membership.id,
     metadata: {
       removedUserId: memberId,
+      removedRoleId: membership.roleId,
     },
   });
 
