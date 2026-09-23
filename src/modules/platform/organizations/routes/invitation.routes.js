@@ -9,15 +9,42 @@ const router = express.Router({ mergeParams: true });
 // All routes require authentication
 router.use(authMiddleware.authenticate);
 
-// Organization invitations
-router.post('/', invitationController.sendInvitation);
+// ============================================================
+// ORGANIZATION INVITATIONS
+// ============================================================
+
+// List all invitations for the organization
+// GET /api/v1/organizations/:organizationId/invitations?status=PENDING
 router.get('/', invitationController.getOrganizationInvitations);
 
-// User's invitations
-router.get('/my', invitationController.getUserInvitations);
+// Send a new invitation
+// POST /api/v1/organizations/:organizationId/invitations
+router.post('/', invitationController.sendInvitation);
 
-// Accept/Reject
+// ============================================================
+// INVITE-TIME ACTIONS (accept / reject)
+// ============================================================
+
 router.post('/accept', invitationController.acceptInvitation);
 router.post('/reject', invitationController.rejectInvitation);
+
+// ============================================================
+// PER-INVITATION ACTIONS
+// ============================================================
+
+// Resend a pending invitation (regenerates token + extends expiry)
+// POST /api/v1/organizations/:organizationId/invitations/:invitationId/resend
+router.post('/:invitationId/resend', invitationController.resendInvitation);
+
+// Revoke a pending invitation
+// DELETE /api/v1/organizations/:organizationId/invitations/:invitationId
+router.delete('/:invitationId', invitationController.revokeInvitation);
+
+// ============================================================
+// USER-SIDE INVITATIONS (invitee's own list)
+// ============================================================
+
+// GET /api/v1/organizations/invitations/my  (or wherever the parent mounts this)
+router.get('/my', invitationController.getUserInvitations);
 
 export default router;

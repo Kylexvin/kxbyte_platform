@@ -8,14 +8,15 @@ import audit from '../../audit/index.js';
 
 const INVITATION_EXPIRY_DAYS = 7;
 
+// ============================================================
+// SEND INVITATION
+// ============================================================
+// Authorization gate lives in the controller.
+
 const sendInvitation = async (inviterId, organizationId, email, roleId = null) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
-  }
-
-  if (organization.ownerId !== inviterId) {
-    throw new Error('Only the organization owner can send invitations');
   }
 
   const pending = await invitationDb.findPendingInvitation(email, organizationId);
@@ -24,7 +25,9 @@ const sendInvitation = async (inviterId, organizationId, email, roleId = null) =
   }
 
   const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(
+    Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+  );
 
   const invitation = await invitationDb.createInvitation({
     email,
@@ -36,32 +39,31 @@ const sendInvitation = async (inviterId, organizationId, email, roleId = null) =
   });
 
   const inviter = await orgDb.findUserById(inviterId);
-  const inviterName = inviter ? `${inviter.firstName} ${inviter.lastName}` : 'Someone';
+  const inviterName = inviter
+    ? `${inviter.firstName} ${inviter.lastName}`
+    : 'Someone';
 
   await sendInvitationEmail(email, token, organization.name, inviterName);
 
-  // Audit log: Invitation sent
   await audit.log({
     organizationId: organization.id,
     userId: inviterId,
     action: 'INVITATION_SENT',
     resource: 'invitation',
     resourceId: invitation.id,
-    metadata: {
-      email: email,
-      roleId: roleId,
-      expiresAt: expiresAt,
-    },
+    metadata: { email, roleId, expiresAt },
   });
 
   return invitation;
 };
 
+// ============================================================
+// ACCEPT INVITATION
+// ============================================================
+
 const acceptInvitation = async (token, userId) => {
   const invitation = await invitationDb.findInvitationByToken(token);
-  if (!invitation) {
-    throw new Error('Invalid invitation');
-  }
+  if (!invitation) throw new Error('Invalid invitation');
 
   if (invitation.status !== 'PENDING') {
     throw new Error(`Invitation is already ${invitation.status.toLowerCase()}`);
@@ -72,7 +74,10 @@ const acceptInvitation = async (token, userId) => {
     throw new Error('Invitation has expired');
   }
 
-  const existingMembership = await orgDb.findMembership(userId, invitation.organizationId);
+  const existingMembership = await orgDb.findMembership(
+    userId,
+    invitation.organizationId
+  );
   if (existingMembership) {
     throw new Error('You are already a member of this organization');
   }
@@ -84,32 +89,31 @@ const acceptInvitation = async (token, userId) => {
     isActive: true,
   });
 
-  await invitationDb.updateInvitationStatus(invitation.id, 'ACCEPTED', new Date());
+  await invitationDb.updateInvitationStatus(
+    invitation.id,
+    'ACCEPTED',
+    new Date()
+  );
 
-  // Audit log: Invitation accepted
   await audit.log({
     organizationId: invitation.organizationId,
-    userId: userId,
+    userId,
     action: 'INVITATION_ACCEPTED',
     resource: 'invitation',
     resourceId: invitation.id,
-    metadata: {
-      email: invitation.email,
-      roleId: invitation.roleId,
-    },
+    metadata: { email: invitation.email, roleId: invitation.roleId },
   });
 
-  return {
-    membership,
-    organization: invitation.organization,
-  };
+  return { membership, organization: invitation.organization };
 };
+
+// ============================================================
+// REJECT INVITATION
+// ============================================================
 
 const rejectInvitation = async (token) => {
   const invitation = await invitationDb.findInvitationByToken(token);
-  if (!invitation) {
-    throw new Error('Invalid invitation');
-  }
+  if (!invitation) throw new Error('Invalid invitation');
 
   if (invitation.status !== 'PENDING') {
     throw new Error(`Invitation is already ${invitation.status.toLowerCase()}`);
@@ -117,38 +121,126 @@ const rejectInvitation = async (token) => {
 
   await invitationDb.updateInvitationStatus(invitation.id, 'REJECTED');
 
-  // Audit log: Invitation rejected
   await audit.log({
     organizationId: invitation.organizationId,
     userId: invitation.invitedById,
     action: 'INVITATION_REJECTED',
     resource: 'invitation',
     resourceId: invitation.id,
-    metadata: {
-      email: invitation.email,
-    },
+    metadata: { email: invitation.email },
   });
 
   return { message: 'Invitation rejected' };
 };
 
-const getOrganizationInvitations = async (organizationId, userId) => {
+// ============================================================
+// GET ORGANIZATION INVITATIONS
+// ============================================================
+
+const getOrganizationInvitations = async (organizationId, status = null) => {
   const organization = await orgDb.findOrganizationById(organizationId);
-  if (!organization) {
-    throw new Error('Organization not found');
-  }
+  if (!organization) throw new Error('Organization not found');
 
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can view invitations');
-  }
+  const invitations = await invitationDb.findInvitationsByOrganization(
+    organizationId
+  );
 
-  const invitations = await invitationDb.findInvitationsByOrganization(organizationId);
-  return invitations;
+  if (!status) return invitations;
+
+  return invitations.filter((inv) => inv.status === status);
 };
 
+// ============================================================
+// GET USER INVITATIONS
+// ============================================================
+
 const getUserInvitations = async (email) => {
-  const invitations = await invitationDb.findInvitationsByEmail(email);
-  return invitations;
+  return invitationDb.findInvitationsByEmail(email);
+};
+
+// ============================================================
+// RESEND INVITATION
+// ============================================================
+
+const resendInvitation = async (invitationId, organizationId, userId) => {
+  const invitation = await invitationDb.findInvitationById(invitationId);
+
+  if (!invitation || invitation.organizationId !== organizationId) {
+    throw new Error('Invitation not found');
+  }
+
+  if (invitation.status !== 'PENDING') {
+    throw new Error('Only pending invitations can be resent');
+  }
+
+  const newToken = crypto.randomBytes(32).toString('hex');
+  const newExpiresAt = new Date(
+    Date.now() + INVITATION_EXPIRY_DAYS * 24 * 60 * 60 * 1000
+  );
+
+  const updated = await invitationDb.updateInvitation(invitationId, {
+    token: newToken,
+    expiresAt: newExpiresAt,
+  });
+
+  const organization = await orgDb.findOrganizationById(organizationId);
+  const inviter = await orgDb.findUserById(userId);
+  const inviterName = inviter
+    ? `${inviter.firstName} ${inviter.lastName}`
+    : 'Someone';
+
+  await sendInvitationEmail(
+    updated.email,
+    newToken,
+    organization?.name ?? 'the organization',
+    inviterName
+  );
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'INVITATION_RESENT',
+    resource: 'invitation',
+    resourceId: invitationId,
+    metadata: { email: updated.email, newExpiresAt },
+  });
+
+  return updated;
+};
+
+// ============================================================
+// REVOKE INVITATION
+// ============================================================
+// Uses `REJECTED` because the current InvitationStatus enum does
+// not include REVOKED. Audit metadata carries `reason` so we can
+// distinguish a revoke from an invitee-initiated rejection.
+
+const revokeInvitation = async (invitationId, organizationId, userId) => {
+  const invitation = await invitationDb.findInvitationById(invitationId);
+
+  if (!invitation || invitation.organizationId !== organizationId) {
+    throw new Error('Invitation not found');
+  }
+
+  if (invitation.status !== 'PENDING') {
+    throw new Error('Only pending invitations can be revoked');
+  }
+
+  const updated = await invitationDb.updateInvitationStatus(
+    invitationId,
+    'REJECTED'
+  );
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'INVITATION_REVOKED',
+    resource: 'invitation',
+    resourceId: invitationId,
+    metadata: { email: invitation.email, reason: 'revoked_by_owner' },
+  });
+
+  return { message: 'Invitation revoked', invitation: updated };
 };
 
 export default {
@@ -157,4 +249,6 @@ export default {
   rejectInvitation,
   getOrganizationInvitations,
   getUserInvitations,
+  resendInvitation,
+  revokeInvitation,
 };

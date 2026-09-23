@@ -23,6 +23,12 @@ const findInvitationByToken = async (token) => {
   });
 };
 
+const findInvitationById = async (id) => {
+  return prisma.invitation.findUnique({
+    where: { id },
+  });
+};
+
 const findPendingInvitation = async (email, organizationId) => {
   return prisma.invitation.findFirst({
     where: {
@@ -91,4 +97,5 @@ export default {
   findInvitationsByEmail,
   updateInvitationStatus,
   updateInvitation,
+  findInvitationById,
 };

@@ -11,7 +11,7 @@ router.use(authMiddleware.authenticate);
 router.post('/', orgController.createOrganization);
 router.get('/', orgController.getOrganizations);
 
-// ✅ Move this BEFORE /:id
+
 router.get('/archived', orgController.getArchivedOrganizations);
 
 router.get('/:id', orgController.getOrganization);
