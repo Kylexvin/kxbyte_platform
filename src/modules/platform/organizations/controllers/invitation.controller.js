@@ -122,7 +122,7 @@ const sendInvitation = async (req, res) => {
 
       const isOwner = organization.ownerId === userId;
 
-      const targetRole = await roleDb.findRoleWithPermissions(roleId);
+      const targetRole = await roleDb.findRoleById(roleId);
       if (!targetRole) {
         return res.status(400).json({ error: 'Role not found' });
       }
