@@ -1,16 +1,24 @@
 // src/modules/platform/branches/controllers/branch-activity.controller.js
 
 import branchActivityService from '../services/branch-activity.service.js';
+import authorizationService from '../../authorization/services/authorization.service.js';
+
+const checkPermission = async (userId, organizationId, permissionKey) => {
+  return authorizationService.checkPermission(userId, organizationId, permissionKey);
+};
 
 const getBranchActivity = async (req, res) => {
   try {
     const userId = req.user?.userId;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { organizationId } = req.params;
     const { days = 7 } = req.query;
+
+    const hasPermission = await checkPermission(userId, organizationId, 'branches.view');
+    if (!hasPermission) {
+      return res.status(403).json({ error: 'You do not have permission to view branch activity' });
+    }
 
     const result = await branchActivityService.getBranchActivity(
       organizationId,

@@ -4,6 +4,9 @@ import branchDb from '../db/branch.db.js';
 import orgDb from '../../organizations/db/org.db.js';
 import audit from '../../audit/index.js';
 
+// NOTE: All authorization is enforced at the controller layer.
+// These functions assume the caller has already been authorized.
+
 // ============================================================
 // BRANCH CRUD
 // ============================================================
@@ -14,13 +17,11 @@ const createBranch = async (userId, organizationId, data) => {
     throw new Error('Organization not found');
   }
 
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can create branches');
-  }
-
   // Check if code already exists
-  const branches = await branchDb.findBranchesByOrganization(organizationId, { limit: 100 });
-  if (branches.items.some(b => b.code === data.code)) {
+  const branches = await branchDb.findBranchesByOrganization(organizationId, {
+    limit: 100,
+  });
+  if (branches.items.some((b) => b.code === data.code)) {
     throw new Error('Branch code already exists');
   }
 
@@ -41,10 +42,7 @@ const createBranch = async (userId, organizationId, data) => {
     action: 'BRANCH_CREATED',
     resource: 'branch',
     resourceId: branch.id,
-    metadata: {
-      name: branch.name,
-      code: branch.code,
-    },
+    metadata: { name: branch.name, code: branch.code },
   });
 
   return branch;
@@ -79,10 +77,6 @@ const updateBranch = async (organizationId, userId, branchId, data) => {
     throw new Error('Organization not found');
   }
 
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can update branches');
-  }
-
   const branch = await branchDb.findBranchById(branchId, organizationId);
   if (!branch) {
     throw new Error('Branch not found');
@@ -91,7 +85,7 @@ const updateBranch = async (organizationId, userId, branchId, data) => {
   // Check if code already exists (if code is being updated)
   if (data.code && data.code !== branch.code) {
     const branches = await branchDb.findBranchesByOrganization(organizationId);
-    if (branches.items.some(b => b.code === data.code)) {
+    if (branches.items.some((b) => b.code === data.code)) {
       throw new Error('Branch code already exists');
     }
   }
@@ -104,10 +98,7 @@ const updateBranch = async (organizationId, userId, branchId, data) => {
     action: 'BRANCH_UPDATED',
     resource: 'branch',
     resourceId: branchId,
-    metadata: {
-      name: updated.name,
-      code: updated.code,
-    },
+    metadata: { name: updated.name, code: updated.code },
   });
 
   return updated;
@@ -119,15 +110,12 @@ const deleteBranch = async (organizationId, userId, branchId) => {
     throw new Error('Organization not found');
   }
 
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can delete branches');
-  }
-
   const branch = await branchDb.findBranchById(branchId, organizationId);
   if (!branch) {
     throw new Error('Branch not found');
   }
 
+  // Business rule: the default branch can never be deleted.
   if (branch.isDefault) {
     throw new Error('Cannot delete the default branch');
   }
@@ -140,10 +128,7 @@ const deleteBranch = async (organizationId, userId, branchId) => {
     action: 'BRANCH_DELETED',
     resource: 'branch',
     resourceId: branchId,
-    metadata: {
-      name: branch.name,
-      code: branch.code,
-    },
+    metadata: { name: branch.name, code: branch.code },
   });
 
   return deleted;
@@ -159,23 +144,16 @@ const assignBranchToMember = async (organizationId, userId, memberId, branchId) 
     throw new Error('Organization not found');
   }
 
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can assign branches to members');
-  }
-
-  // Check if member exists in organization
   const membership = await orgDb.findMembership(memberId, organizationId);
   if (!membership) {
     throw new Error('Member not found in this organization');
   }
 
-  // Check if branch exists
   const branch = await branchDb.findBranchById(branchId, organizationId);
   if (!branch) {
     throw new Error('Branch not found');
   }
 
-  // Check if already assigned
   const hasAccess = await branchDb.hasBranchAccess(membership.id, branchId);
   if (hasAccess) {
     throw new Error('Member already has access to this branch');
@@ -189,11 +167,7 @@ const assignBranchToMember = async (organizationId, userId, memberId, branchId) 
     action: 'BRANCH_ASSIGNED',
     resource: 'branch_assignment',
     resourceId: assignment.id,
-    metadata: {
-      memberId,
-      branchId,
-      branchName: branch.name,
-    },
+    metadata: { memberId, branchId, branchName: branch.name },
   });
 
   return assignment;
@@ -203,10 +177,6 @@ const removeBranchFromMember = async (organizationId, userId, memberId, branchId
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
-  }
-
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can remove branch access');
   }
 
   const membership = await orgDb.findMembership(memberId, organizationId);
@@ -219,7 +189,8 @@ const removeBranchFromMember = async (organizationId, userId, memberId, branchId
     throw new Error('Branch not found');
   }
 
-  // Check if member has all branches access
+  // Business rule: members with all-branches access cannot have
+  // individual branches removed.
   if (membership.hasAllBranches) {
     throw new Error('Member has all branches access. Remove that permission first.');
   }
@@ -231,11 +202,7 @@ const removeBranchFromMember = async (organizationId, userId, memberId, branchId
     userId,
     action: 'BRANCH_UNASSIGNED',
     resource: 'branch_assignment',
-    metadata: {
-      memberId,
-      branchId,
-      branchName: branch.name,
-    },
+    metadata: { memberId, branchId, branchName: branch.name },
   });
 
   return { message: 'Branch access removed' };
@@ -247,21 +214,17 @@ const getMemberBranches = async (organizationId, userId, memberId) => {
     throw new Error('Organization not found');
   }
 
-  if (organization.ownerId !== userId) {
-    throw new Error('Only the organization owner can view member branches');
-  }
-
   const membership = await orgDb.findMembership(memberId, organizationId);
   if (!membership) {
     throw new Error('Member not found in this organization');
   }
 
   const assignments = await branchDb.findAssignmentsByMembership(membership.id);
-  return assignments.map(a => a.branch);
+  return assignments.map((a) => a.branch);
 };
 
 // ============================================================
-// BRANCH ACCESS CHECK (for authorization)
+// BRANCH ACCESS CHECK
 // ============================================================
 
 const hasBranchAccess = async (membershipId, branchId) => {
@@ -274,17 +237,23 @@ const getUserBranches = async (userId, organizationId) => {
     return [];
   }
 
-  // If user has all branches access, return all branches
+  // Owner sees all branches
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (organization && organization.ownerId === userId) {
+    const branches = await branchDb.findBranchesByOrganization(organizationId);
+    return branches.items;
+  }
+
+  // Members with all-branches access see all
   if (membership.hasAllBranches) {
     const branches = await branchDb.findBranchesByOrganization(organizationId);
     return branches.items;
   }
 
-  // Otherwise, return assigned branches
+  // Otherwise, only assigned branches
   const assignments = await branchDb.findAssignmentsByMembership(membership.id);
-  return assignments.map(a => a.branch);
+  return assignments.map((a) => a.branch);
 };
-
 
 export default {
   createBranch,

@@ -73,7 +73,7 @@ const sendInvitation = async (req, res) => {
     }
 
     const { organizationId } = req.params;
-    const { email, roleId } = req.body;
+    const { email, roleId, branchIds } = req.body;
 
     // ---- Permission gate ----
     const hasPermission = await checkPermission(
@@ -153,12 +153,13 @@ const sendInvitation = async (req, res) => {
       }
     }
 
-    const invitation = await invitationService.sendInvitation(
-      userId,
-      organizationId,
-      normalizedEmail,
-      roleId
-    );
+const invitation = await invitationService.sendInvitation(
+  userId,
+  organizationId,
+  normalizedEmail,
+  roleId,
+  Array.isArray(branchIds) ? branchIds : []
+);
 
     res.status(201).json({ invitation });
   } catch (error) {

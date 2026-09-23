@@ -158,6 +158,7 @@ model Invitation {
   invitedById    String
   invitedBy      User     @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
   roleId         String?
+  branchIds      String[]
   token          String   @unique
   status         InvitationStatus @default(PENDING)
   expiresAt      DateTime

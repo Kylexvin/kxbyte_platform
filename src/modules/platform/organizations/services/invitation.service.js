@@ -3,6 +3,7 @@
 import crypto from 'crypto';
 import invitationDb from '../db/invitation.db.js';
 import orgDb from '../db/org.db.js';
+import branchDb from '../../branches/db/branch.db.js';
 import { sendInvitationEmail } from '../../identity/email/email.service.js';
 import audit from '../../audit/index.js';
 
@@ -11,9 +12,14 @@ const INVITATION_EXPIRY_DAYS = 7;
 // ============================================================
 // SEND INVITATION
 // ============================================================
-// Authorization gate lives in the controller.
 
-const sendInvitation = async (inviterId, organizationId, email, roleId = null) => {
+const sendInvitation = async (
+  inviterId,
+  organizationId,
+  email,
+  roleId = null,
+  branchIds = []
+) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
@@ -34,6 +40,7 @@ const sendInvitation = async (inviterId, organizationId, email, roleId = null) =
     organizationId,
     invitedById: inviterId,
     roleId,
+    branchIds,
     token,
     expiresAt,
   });
@@ -51,7 +58,7 @@ const sendInvitation = async (inviterId, organizationId, email, roleId = null) =
     action: 'INVITATION_SENT',
     resource: 'invitation',
     resourceId: invitation.id,
-    metadata: { email, roleId, expiresAt },
+    metadata: { email, roleId, branchIds, expiresAt },
   });
 
   return invitation;
@@ -63,7 +70,9 @@ const sendInvitation = async (inviterId, organizationId, email, roleId = null) =
 
 const acceptInvitation = async (token, userId) => {
   const invitation = await invitationDb.findInvitationByToken(token);
-  if (!invitation) throw new Error('Invalid invitation');
+  if (!invitation) {
+    throw new Error('Invalid invitation');
+  }
 
   if (invitation.status !== 'PENDING') {
     throw new Error(`Invitation is already ${invitation.status.toLowerCase()}`);
@@ -89,6 +98,16 @@ const acceptInvitation = async (token, userId) => {
     isActive: true,
   });
 
+  // Attach branches carried by the invitation. Non-fatal if a
+  // single branchId fails — the invitee still ends up as a member.
+  for (const branchId of invitation.branchIds ?? []) {
+    try {
+      await branchDb.assignBranchToMembership(membership.id, branchId);
+    } catch (err) {
+      console.error(`Failed to assign branch ${branchId} on accept:`, err);
+    }
+  }
+
   await invitationDb.updateInvitationStatus(
     invitation.id,
     'ACCEPTED',
@@ -101,10 +120,17 @@ const acceptInvitation = async (token, userId) => {
     action: 'INVITATION_ACCEPTED',
     resource: 'invitation',
     resourceId: invitation.id,
-    metadata: { email: invitation.email, roleId: invitation.roleId },
+    metadata: {
+      email: invitation.email,
+      roleId: invitation.roleId,
+      branchIds: invitation.branchIds ?? [],
+    },
   });
 
-  return { membership, organization: invitation.organization };
+  return {
+    membership,
+    organization: invitation.organization,
+  };
 };
 
 // ============================================================
@@ -113,7 +139,9 @@ const acceptInvitation = async (token, userId) => {
 
 const rejectInvitation = async (token) => {
   const invitation = await invitationDb.findInvitationByToken(token);
-  if (!invitation) throw new Error('Invalid invitation');
+  if (!invitation) {
+    throw new Error('Invalid invitation');
+  }
 
   if (invitation.status !== 'PENDING') {
     throw new Error(`Invitation is already ${invitation.status.toLowerCase()}`);
@@ -139,7 +167,9 @@ const rejectInvitation = async (token) => {
 
 const getOrganizationInvitations = async (organizationId, status = null) => {
   const organization = await orgDb.findOrganizationById(organizationId);
-  if (!organization) throw new Error('Organization not found');
+  if (!organization) {
+    throw new Error('Organization not found');
+  }
 
   const invitations = await invitationDb.findInvitationsByOrganization(
     organizationId
@@ -211,9 +241,6 @@ const resendInvitation = async (invitationId, organizationId, userId) => {
 // ============================================================
 // REVOKE INVITATION
 // ============================================================
-// Uses `REJECTED` because the current InvitationStatus enum does
-// not include REVOKED. Audit metadata carries `reason` so we can
-// distinguish a revoke from an invitee-initiated rejection.
 
 const revokeInvitation = async (invitationId, organizationId, userId) => {
   const invitation = await invitationDb.findInvitationById(invitationId);
@@ -242,6 +269,10 @@ const revokeInvitation = async (invitationId, organizationId, userId) => {
 
   return { message: 'Invitation revoked', invitation: updated };
 };
+
+// ============================================================
+// EXPORTS
+// ============================================================
 
 export default {
   sendInvitation,

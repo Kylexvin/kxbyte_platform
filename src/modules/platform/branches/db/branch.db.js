@@ -30,6 +30,9 @@ const findBranchById = async (id, organizationId) => {
           },
         },
       },
+      _count: {
+        select: { assignments: true },
+      },
     },
   });
 };
@@ -59,6 +62,9 @@ const findBranchesByOrganization = async (organizationId, filters = {}) => {
               },
             },
           },
+        },
+        _count: {
+          select: { assignments: true },
         },
       },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
