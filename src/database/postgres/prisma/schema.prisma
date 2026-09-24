@@ -81,6 +81,7 @@ model Organization {
   ownerId     String
   owner       User     @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   logo        String?
+  logoPublicId String?
   email       String?
   phone       String?
   address     String?

@@ -149,10 +149,10 @@ const updateOrganization = async (organizationId, userId, data) => {
     throw new Error('Only the organization owner can update this organization');
   }
 
-  const allowedFields = [
-    'name', 'logo', 'email', 'phone', 'address',
-    'country', 'currency', 'timezone', 'auditLogRetention',
-  ];
+const allowedFields = [
+  'name', 'logo', 'logoPublicId', 'email', 'phone', 'address',
+  'country', 'currency', 'timezone', 'auditLogRetention',
+];
 
   const updateData = {};
   for (const field of allowedFields) {
