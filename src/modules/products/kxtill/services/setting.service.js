@@ -43,7 +43,8 @@ const getSettings = async (organizationId, userId) => {
     // Security
     sessionTimeout: settings?.sessionTimeout ?? 30,
     requirePinForRefund: settings?.requirePinForRefund ?? true,
-    auditLogRetention: settings?.auditLogRetention ?? 90,
+    // moved to top level
+    // auditLogRetention: settings?.auditLogRetention ?? 90,
 
     // Branch
     allowBranchSwitch: settings?.allowBranchSwitch ?? true,

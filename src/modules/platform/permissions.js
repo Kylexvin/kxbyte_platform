@@ -94,6 +94,20 @@ const platformPermissions = [
     name: 'Create Support Tickets',
     description: 'Create support tickets',
   },
+
+  // ============================================================
+// SETTINGS
+// ============================================================
+{
+  key: 'settings.view',
+  name: 'View Settings',
+  description: 'View organization settings and preferences',
+},
+{
+  key: 'settings.manage',
+  name: 'Manage Settings',
+  description: 'Update organization settings and preferences',
+},
 ];
 
 export default platformPermissions;

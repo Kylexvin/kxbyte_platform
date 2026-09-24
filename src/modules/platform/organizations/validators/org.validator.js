@@ -1,5 +1,7 @@
 // src/modules/platform/organizations/validators/org.validator.js
 
+const ALLOWED_RETENTION_DAYS = [30, 45, 60, 90];
+
 const validateCreateOrganization = (data) => {
   const { name, country } = data;
   const errors = [];
@@ -14,6 +16,12 @@ const validateCreateOrganization = (data) => {
 
   if (!country || country.length !== 2) {
     errors.push('Country is required (2-letter code, e.g., KE, US, GB)');
+  }
+
+  if (data.auditLogRetention !== undefined && data.auditLogRetention !== null) {
+    if (!ALLOWED_RETENTION_DAYS.includes(Number(data.auditLogRetention))) {
+      errors.push('Audit log retention must be one of: 30, 45, 60, 90 days');
+    }
   }
 
   return {
@@ -49,6 +57,12 @@ const validateUpdateOrganization = (data) => {
 
   if (data.phone !== undefined && data.phone !== null && data.phone.length > 0 && data.phone.length < 10) {
     errors.push('Phone number must be at least 10 digits');
+  }
+
+  if (data.auditLogRetention !== undefined && data.auditLogRetention !== null) {
+    if (!ALLOWED_RETENTION_DAYS.includes(Number(data.auditLogRetention))) {
+      errors.push('Audit log retention must be one of: 30, 45, 60, 90 days');
+    }
   }
 
   return {

@@ -87,6 +87,7 @@ model Organization {
   country     String
   currency    String   @default("KES")
   timezone    String   @default("Africa/Nairobi")
+  auditLogRetention Int @default(45)
   isInternal  Boolean  @default(false)
   isActive    Boolean  @default(true)
   isArchived  Boolean  @default(false)

@@ -32,7 +32,7 @@ const createOrganization = async (userId, data) => {
     hasAllBranches: true, // Owner has access to all branches
   });
 
-  // ✅ Create default branch
+ 
   const defaultBranch = await prisma.branch.create({
     data: {
       organizationId: organization.id,
@@ -144,41 +144,47 @@ const getOrganizationBySlug = async (slug, userId) => {
 
 const updateOrganization = async (organizationId, userId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
-  if (!organization) {
-    throw new Error('Organization not found');
-  }
-
+  if (!organization) throw new Error('Organization not found');
   if (organization.ownerId !== userId) {
     throw new Error('Only the organization owner can update this organization');
   }
 
+  const allowedFields = [
+    'name', 'logo', 'email', 'phone', 'address',
+    'country', 'currency', 'timezone', 'auditLogRetention',
+  ];
+
   const updateData = {};
-  const allowedFields = ['name', 'logo', 'email', 'phone', 'address', 'country', 'currency', 'timezone'];
   for (const field of allowedFields) {
-    if (data[field] !== undefined) {
-      updateData[field] = data[field];
-    }
+    if (data[field] !== undefined) updateData[field] = data[field];
   }
 
-  if (data.name && data.name !== organization.name) {
-    updateData.slug = await generateSlug(data.name);
+  if (updateData.name && updateData.name !== organization.name) {
+    updateData.slug = await generateSlug(updateData.name);
   }
+
+  if (updateData.auditLogRetention !== undefined) {
+    const n = Number(updateData.auditLogRetention);
+    const allowed = [30, 45, 60, 90];
+    if (!allowed.includes(n)) {
+      throw new Error('Audit log retention must be one of: 30, 45, 60, 90 days');
+    }
+    updateData.auditLogRetention = n;
+  }
+
+  if (Object.keys(updateData).length === 0) return organization;
 
   const updated = await orgDb.updateOrganization(organizationId, updateData);
 
-  // Audit log: Organization updated
   await audit.log({
     organizationId: organization.id,
-    userId: userId,
+    userId,
     action: 'ORGANIZATION_UPDATED',
     resource: 'organization',
     resourceId: organization.id,
     metadata: {
       updatedFields: Object.keys(updateData),
-      before: {
-        name: organization.name,
-        country: organization.country,
-      },
+      before: { name: organization.name, country: organization.country },
     },
   });
 
