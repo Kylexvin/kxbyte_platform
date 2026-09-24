@@ -1,17 +1,20 @@
 // src/modules/platform/uploads/upload.service.js
 
+import crypto from 'crypto';
 import cloudinaryUtil from './cloudinary.util.js';
 
 // ============================================================
-// ALLOWED FOLDERS
+// PUBLIC ID BUILDER
 // ============================================================
-// Frontend can only request signatures for folders on this list.
+// The public_id fully determines the asset path in Cloudinary.
+// Frontend can only request signatures for kinds on this list.
 // Prevents open-signature abuse (someone using our account as a
 // free CDN for arbitrary assets).
 
-const buildAllowedFolder = (orgId, kind) => {
+const buildPublicId = (orgId, kind) => {
+  const uuid = crypto.randomUUID();
   const kinds = {
-    logo: `kxbyte/orgs/${orgId}/logos`,
+    logo: `kxbyte/orgs/${orgId}/logos/${uuid}`,
   };
   return kinds[kind] ?? null;
 };
@@ -20,15 +23,14 @@ const buildAllowedFolder = (orgId, kind) => {
 // ISSUE SIGNATURE
 // ============================================================
 
-const issueSignature = async (userId, organizationId, { kind, publicId }) => {
-  const folder = buildAllowedFolder(organizationId, kind);
+const issueSignature = async (userId, organizationId, { kind }) => {
+  const publicId = buildPublicId(organizationId, kind);
 
-  if (!folder) {
+  if (!publicId) {
     throw new Error('Invalid upload kind');
   }
 
   const signature = cloudinaryUtil.generateUploadSignature({
-    folder,
     publicId,
     resourceType: 'image',
   });

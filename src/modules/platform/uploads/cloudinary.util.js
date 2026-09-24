@@ -19,17 +19,13 @@ cloudinary.config({
 // Signs a payload the client will POST directly to Cloudinary.
 // The client sends the file; we only sign the metadata.
 
-const generateUploadSignature = ({ folder, publicId, resourceType = 'image' }) => {
+const generateUploadSignature = ({ publicId, resourceType = 'image' }) => {
   const timestamp = Math.round(Date.now() / 1000);
 
   const paramsToSign = {
-    folder,
+    public_id: publicId,
     timestamp,
   };
-
-  if (publicId) {
-    paramsToSign.public_id = publicId;
-  }
 
   const signature = cloudinary.utils.api_sign_request(
     paramsToSign,
@@ -43,8 +39,7 @@ const generateUploadSignature = ({ folder, publicId, resourceType = 'image' }) =
     timestamp,
     apiKey: process.env.CLOUDINARY_API_KEY,
     cloudName: process.env.CLOUDINARY_CLOUD_NAME,
-    folder,
-    publicId: publicId ?? null,
+    publicId,
     uploadUrl,
   };
 };
