@@ -79,11 +79,11 @@ const findTicketsByOrganization = async (organizationId, filters = {}) => {
 };
 
 const findTicketsByUser = async (userId, filters = {}) => {
-  const { status, limit = 50, offset = 0 } = filters;
+  const { status, productKey, limit = 50, offset = 0 } = filters;
   const where = { userId };
-
   if (status) where.status = status;
-
+  if (productKey) where.productKey = productKey;
+  
   const [items, total] = await Promise.all([
     prisma.supportTicket.findMany({
       where,
