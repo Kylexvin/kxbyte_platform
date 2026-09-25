@@ -12,6 +12,27 @@ import {
 import audit from '../../audit/index.js';
 import notifications from '../../notifications/index.js';
 
+/**
+ * Extract real client IP + user agent from a request.
+ * Relies on `app.set('trust proxy', 1)` for accurate IP
+ * behind Render / Cloudflare / nginx.
+ */
+const getRequestMeta = (req) => {
+  if (!req) return { ipAddress: null, userAgent: null };
+
+  const forwarded = req.headers?.['x-forwarded-for'];
+  const ipAddress =
+    (typeof forwarded === 'string' && forwarded.split(',')[0].trim()) ||
+    req.ip ||
+    req.socket?.remoteAddress ||
+    null;
+
+  return {
+    ipAddress,
+    userAgent: req.headers?.['user-agent'] || null,
+  };
+};
+
 const TOKEN_EXPIRY = {
   VERIFICATION: 24 * 60 * 60 * 1000, // 24 hours
   PASSWORD_RESET: 60 * 60 * 1000, // 1 hour
@@ -37,7 +58,7 @@ const hashToken = (token) => {
  * Register a new user account.
  * Creates user, generates verification token, and issues JWT tokens.
  */
-const register = async (data) => {
+const register = async (data, req = null) => {
   const { email, password: plainPassword, firstName, lastName } = data;
 
   const normalizedEmail = email.toLowerCase().trim();
@@ -74,11 +95,12 @@ const register = async (data) => {
   const accessToken = jwt.generateAccessToken(user);
   const refreshToken = jwt.generateRefreshToken(user);
 
-  await authDb.createSession({
-    userId: user.id,
-    refreshToken,
-    expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
-  });
+await authDb.createSession({
+  userId: user.id,
+  refreshToken,
+  expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
+  ...getRequestMeta(req),
+});
 
   // Audit: User registration
   await audit.log({
@@ -167,11 +189,12 @@ const login = async (email, plainPassword, req = null) => {
   const accessToken = jwt.generateAccessToken(user);
   const refreshToken = jwt.generateRefreshToken(user);
 
-  const session = await authDb.createSession({
-    userId: user.id,
-    refreshToken,
-    expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
-  });
+const session = await authDb.createSession({
+  userId: user.id,
+  refreshToken,
+  expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
+  ...getRequestMeta(req),
+});
 
   const organizations = await authDb.findOrganizationsByUserId(user.id);
 
@@ -207,10 +230,10 @@ const login = async (email, plainPassword, req = null) => {
       userId: user.id,
       type: 'USER_LOGIN',
       title: 'Login detected',
-      message: `You logged in from ${req?.ip || 'unknown location'}`,
+      message: `You logged in from ${getRequestMeta(req).ipAddress || 'an unknown location'}`,
       channel: 'IN_APP',
       metadata: {
-        ip: req?.ip,
+       ip: getRequestMeta(req).ipAddress,
         userAgent: req?.headers?.['user-agent'],
       },
     });
@@ -276,11 +299,12 @@ const refreshToken = async (refreshToken, req = null) => {
   const newAccessToken = jwt.generateAccessToken(user);
   const newRefreshToken = jwt.generateRefreshToken(user);
 
-  await authDb.createSession({
-    userId: user.id,
-    refreshToken: newRefreshToken,
-    expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
-  });
+await authDb.createSession({
+  userId: user.id,
+  refreshToken: newRefreshToken,
+  expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
+  ...getRequestMeta(req),
+});
 
   await audit.log({
     organizationId: null,

@@ -81,13 +81,32 @@ const platformPermissions = [
     description: 'Manage organization subscriptions',
   },
 
-
-// SUPPORT
 // ============================================================
+// SUPPORT PERMISSIONS — designed to be portable to KxHelp
+// ============================================================
+// The support module today lives at the org level, but the
+// permission keys and data model are shaped so that a future
+// standalone KxHelp product can reuse them verbatim.
+//
+// Mapping (when KxHelp ships as its own product):
+//   org               → workspace
+//   branch contextId  → queue / site / team
+//   support.tickets.* → kxhelp.tickets.*  (or left as-is)
+//
+// KxHelp's own permission catalog (in its product folder) should
+// mirror these keys. If a key changes here, it should change
+// there too, and the reverse.
+// ============================================================
+
 {
   key: 'support.tickets.view',
   name: 'View Support Tickets',
-  description: 'View support tickets and replies',
+  description: 'View support tickets you have access to',
+},
+{
+  key: 'support.tickets.view.all',
+  name: 'View All Support Tickets',
+  description: 'View every support ticket in the organization, regardless of branch',
 },
 {
   key: 'support.tickets.create',

@@ -3,6 +3,10 @@
 import ticketService from '../services/ticket.service.js';
 import ticketValidator from '../validators/ticket.validator.js';
 
+// ============================================================
+// CREATE
+// ============================================================
+
 const createTicket = async (req, res) => {
   const validation = ticketValidator.validateCreateTicket(req.body);
   if (!validation.valid) {
@@ -16,10 +20,17 @@ const createTicket = async (req, res) => {
     }
 
     const { organizationId } = req.params;
-    const ticket = await ticketService.createTicket(userId, organizationId, req.body);
+    const ticket = await ticketService.createTicket(
+      userId,
+      organizationId,
+      req.body
+    );
     res.status(201).json({ ticket });
   } catch (error) {
-    if (error.message === 'Organization not found' || error.message === 'Category not found') {
+    if (
+      error.message === 'Organization not found' ||
+      error.message === 'Category not found'
+    ) {
       return res.status(404).json({ error: error.message });
     }
     if (error.message === 'You do not have access to this organization') {
@@ -33,6 +44,10 @@ const createTicket = async (req, res) => {
   }
 };
 
+// ============================================================
+// LIST
+// ============================================================
+
 const getTickets = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -41,15 +56,26 @@ const getTickets = async (req, res) => {
     }
 
     const { organizationId } = req.params;
-    const { status, priority, categoryId, productKey, limit, offset } = req.query;
+    const {
+      status,
+      priority,
+      categoryId,
+      productKey,
+      contextId,
+      contextType,
+      limit,
+      offset,
+    } = req.query;
 
     const result = await ticketService.getTickets(userId, organizationId, {
       status,
       priority,
       categoryId,
       productKey,
-      limit: limit ? parseInt(limit) : 50,
-      offset: offset ? parseInt(offset) : 0,
+      contextId,
+      contextType,
+      limit: limit ? parseInt(limit, 10) : 50,
+      offset: offset ? parseInt(offset, 10) : 0,
     });
 
     res.status(200).json(result);
@@ -62,6 +88,10 @@ const getTickets = async (req, res) => {
   }
 };
 
+// ============================================================
+// GET ONE
+// ============================================================
+
 const getTicket = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -70,20 +100,30 @@ const getTicket = async (req, res) => {
     }
 
     const { organizationId, ticketId } = req.params;
-    const ticket = await ticketService.getTicketById(userId, organizationId, ticketId);
+    const ticket = await ticketService.getTicketById(
+      userId,
+      organizationId,
+      ticketId
+    );
     res.status(200).json({ ticket });
   } catch (error) {
     if (error.message === 'Ticket not found') {
       return res.status(404).json({ error: error.message });
     }
-    if (error.message === 'You do not have access to this ticket' ||
-        error.message === 'You do not have access to this organization') {
+    if (
+      error.message === 'You do not have access to this ticket' ||
+      error.message === 'You do not have access to this organization'
+    ) {
       return res.status(403).json({ error: error.message });
     }
     console.error('Get ticket error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// ============================================================
+// UPDATE
+// ============================================================
 
 const updateTicket = async (req, res) => {
   const validation = ticketValidator.validateUpdateTicket(req.body);
@@ -98,14 +138,21 @@ const updateTicket = async (req, res) => {
     }
 
     const { organizationId, ticketId } = req.params;
-    const ticket = await ticketService.updateTicket(userId, organizationId, ticketId, req.body);
+    const ticket = await ticketService.updateTicket(
+      userId,
+      organizationId,
+      ticketId,
+      req.body
+    );
     res.status(200).json({ ticket });
   } catch (error) {
     if (error.message === 'Ticket not found') {
       return res.status(404).json({ error: error.message });
     }
-    if (error.message === 'You do not have access to this ticket' ||
-        error.message === 'You do not have access to this organization') {
+    if (
+      error.message === 'You do not have access to this ticket' ||
+      error.message === 'You do not have access to this organization'
+    ) {
       return res.status(403).json({ error: error.message });
     }
     if (error.message === 'You do not have permission to update tickets') {
@@ -115,6 +162,10 @@ const updateTicket = async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 };
+
+// ============================================================
+// ADD MESSAGE
+// ============================================================
 
 const addMessage = async (req, res) => {
   const validation = ticketValidator.validateCreateMessage(req.body);
@@ -144,11 +195,15 @@ const addMessage = async (req, res) => {
     if (error.message === 'Ticket not found') {
       return res.status(404).json({ error: error.message });
     }
-    if (error.message === 'You do not have access to this ticket' ||
-        error.message === 'You do not have access to this organization') {
+    if (
+      error.message === 'You do not have access to this ticket' ||
+      error.message === 'You do not have access to this organization'
+    ) {
       return res.status(403).json({ error: error.message });
     }
-    if (error.message === 'You do not have permission to add internal notes') {
+    if (
+      error.message === 'You do not have permission to add internal notes'
+    ) {
       return res.status(403).json({ error: error.message });
     }
     console.error('Add message error:', error);

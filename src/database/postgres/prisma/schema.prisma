@@ -28,8 +28,7 @@ model User {
   verificationTokens VerificationToken[]
   auditEvents       AuditEvent[]
   notifications     Notification[]
-  kxtillSales       KxTillSale[]
-  supportTickets    SupportTicket[]
+  kxtillSales       KxTillSale[] 
   supportMessages   SupportMessage[]
   socialAccounts    SocialAccount[]
 
@@ -38,6 +37,9 @@ model User {
   rejectedTransfers  KxTillTransfer[] @relation("RejectedBy")
   completedTransfers KxTillTransfer[] @relation("CompletedBy")
   refundedSales     KxTillSale[] @relation("RefundedByUser")
+  
+  supportTickets          SupportTicket[] @relation("TicketReporter")
+  assignedSupportTickets  SupportTicket[] @relation("TicketAssignee")
 
   @@map("users")
 }
@@ -942,16 +944,42 @@ model SupportTicket {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User     @relation("TicketReporter", fields: [userId], references: [id], onDelete: Cascade)
 
   categoryId     String
   category       SupportCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
   title          String
   description    String
-  priority       String   @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
-  status         String   @default("OPEN")   // OPEN, IN_PROGRESS, RESOLVED, CLOSED
-  productKey     String?  // kxtill, kxinvoice, etc.
+  priority       String   @default("MEDIUM")
+  status         String   @default("OPEN")
+  productKey     String?
+
+  // ============================================================
+  // CONTEXT — generic scope tag (branch today, queue/site in KxHelp)
+  // ============================================================
+  contextId      String?
+  contextType    String?  // 'branch' | 'site' | 'queue' (future)
+
+  // ============================================================
+  // ASSIGNMENT
+  // ============================================================
+  assigneeId     String?
+  assignee       User?    @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  // ============================================================
+  // ESCALATION — generic, product-agnostic (KxHelp-ready)
+  // ============================================================
+  escalatedAt      DateTime?
+  escalatedById    String?
+  escalatedToId    String?  // user id, team id, vendor id
+  escalatedToType  String?  // 'user' | 'team' | 'vendor'
+
+  // ============================================================
+  // RESOLUTION
+  // ============================================================
+  resolutionNote   String?
+  resolvedById     String?
 
   messages       SupportMessage[]
 
@@ -963,9 +991,12 @@ model SupportTicket {
 
   @@index([organizationId])
   @@index([userId])
+  @@index([assigneeId])
   @@index([status])
   @@index([categoryId])
   @@index([productKey])
+  @@index([contextId])
+  @@index([contextType])
   @@map("support_tickets")
 }
 

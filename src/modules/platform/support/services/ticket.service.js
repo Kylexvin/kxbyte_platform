@@ -6,6 +6,7 @@ import orgDb from '../../organizations/db/org.db.js';
 import authorizationService from '../../authorization/services/authorization.service.js';
 import audit from '../../audit/index.js';
 import notifications from '../../notifications/index.js';
+import prisma from '../../../../database/postgres/prisma.js';
 
 // ============================================================
 // HELPERS
@@ -15,15 +16,35 @@ const checkPermission = async (userId, organizationId, key) => {
   return authorizationService.checkPermission(userId, organizationId, key);
 };
 
+/**
+ * Returns the contextIds (branch ids) a user has access to via
+ * their branch assignments. Owners bypass this — they always
+ * have all-branches access via `*`.
+ */
+const getUserContextIds = async (userId, organizationId) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) return [];
+
+  // Owner or hasAllBranches → treat as "all"
+  const organization = await orgDb.findOrganizationById(organizationId);
+  if (organization && organization.ownerId === userId) return null;
+  if (membership.hasAllBranches) return null;
+
+  const assignments = await prisma.branchAssignment.findMany({
+    where: { membershipId: membership.id },
+    select: { branchId: true },
+  });
+
+  return assignments.map((a) => a.branchId);
+};
+
 // ============================================================
 // CREATE TICKET
 // ============================================================
 
 const createTicket = async (userId, organizationId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
-  if (!organization) {
-    throw new Error('Organization not found');
-  }
+  if (!organization) throw new Error('Organization not found');
 
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
@@ -40,9 +61,7 @@ const createTicket = async (userId, organizationId, data) => {
   }
 
   const category = await categoryDb.findCategoryById(data.categoryId);
-  if (!category) {
-    throw new Error('Category not found');
-  }
+  if (!category) throw new Error('Category not found');
 
   const ticket = await ticketDb.createTicket({
     organizationId,
@@ -53,6 +72,9 @@ const createTicket = async (userId, organizationId, data) => {
     priority: data.priority || 'MEDIUM',
     status: 'OPEN',
     productKey: data.productKey || null,
+    contextId: data.contextId || null,
+    contextType: data.contextType || 'branch',
+    assigneeId: data.assigneeId || null,
   });
 
   await audit.log({
@@ -66,10 +88,11 @@ const createTicket = async (userId, organizationId, data) => {
       category: category.name,
       priority: ticket.priority,
       productKey: ticket.productKey,
+      contextId: ticket.contextId,
+      contextType: ticket.contextType,
     },
   });
 
-  // Notify the org owner (unless they created it themselves)
   if (organization.ownerId !== userId) {
     const owner = await orgDb.findUserById(organization.ownerId);
     if (owner) {
@@ -93,10 +116,14 @@ const createTicket = async (userId, organizationId, data) => {
 };
 
 // ============================================================
-// LIST TICKETS
+// LIST TICKETS — permission + context scoped
 // ============================================================
-// Members with `support.tickets.view` see all org tickets.
-// Everyone else sees only their own.
+// Priority of scope (first match wins):
+//   1. support.tickets.view.all → every ticket in the org
+//   2. support.tickets.manage   → tickets in the caller's contexts
+//                                 (branches) OR tickets the caller created
+//   3. support.tickets.view     → tickets the caller created
+//   4. none                     → empty (also used for "own only")
 
 const getTickets = async (userId, organizationId, filters = {}) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -107,19 +134,48 @@ const getTickets = async (userId, organizationId, filters = {}) => {
   const hasViewAll = await checkPermission(
     userId,
     organizationId,
-    'support.tickets.view'
+    'support.tickets.view.all'
   );
 
   if (hasViewAll) {
     return ticketDb.findTicketsByOrganization(organizationId, filters);
   }
 
+  const hasManage = await checkPermission(
+    userId,
+    organizationId,
+    'support.tickets.manage'
+  );
+
+  if (hasManage) {
+    const contextIds = await getUserContextIds(userId, organizationId);
+
+    // null means "all contexts" — treat as owner-level list
+    if (contextIds === null) {
+      return ticketDb.findTicketsByOrganization(organizationId, filters);
+    }
+
+    // No branch assignments → fall back to own tickets
+    if (contextIds.length === 0) {
+      return ticketDb.findTicketsByUser(userId, filters);
+    }
+
+    return ticketDb.findTicketsByContexts(organizationId, contextIds, filters);
+  }
+
+  // Everyone else: only their own
   return ticketDb.findTicketsByUser(userId, filters);
 };
 
 // ============================================================
 // GET ONE TICKET
 // ============================================================
+// Access rules:
+//   - Author always can read their own ticket
+//   - Assignee can read
+//   - view.all → can read any ticket in the org
+//   - manage + ticket's contextId is in caller's contexts → can read
+//   - else → 403
 
 const getTicketById = async (userId, organizationId, ticketId) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -128,28 +184,45 @@ const getTicketById = async (userId, organizationId, ticketId) => {
   }
 
   const ticket = await ticketDb.findTicketById(ticketId);
-  if (!ticket) {
-    throw new Error('Ticket not found');
-  }
+  if (!ticket) throw new Error('Ticket not found');
 
   if (ticket.organizationId !== organizationId) {
     throw new Error('You do not have access to this ticket');
   }
 
-  // Author always has access.
+  // Author
   if (ticket.userId === userId) return ticket;
 
-  // Otherwise, needs view permission.
+  // Assignee
+  if (ticket.assigneeId === userId) return ticket;
+
+  // view.all
   const hasViewAll = await checkPermission(
     userId,
     organizationId,
-    'support.tickets.view'
+    'support.tickets.view.all'
   );
-  if (!hasViewAll) {
-    throw new Error('You do not have access to this ticket');
+  if (hasViewAll) return ticket;
+
+  // manage + context match
+  const hasManage = await checkPermission(
+    userId,
+    organizationId,
+    'support.tickets.manage'
+  );
+  if (hasManage) {
+    const contextIds = await getUserContextIds(userId, organizationId);
+
+    if (contextIds === null) return ticket;
+    if (
+      ticket.contextId &&
+      contextIds.includes(ticket.contextId)
+    ) {
+      return ticket;
+    }
   }
 
-  return ticket;
+  throw new Error('You do not have access to this ticket');
 };
 
 // ============================================================
@@ -168,7 +241,25 @@ const updateTicket = async (userId, organizationId, ticketId, data) => {
     throw new Error('You do not have permission to update tickets');
   }
 
-  const updated = await ticketDb.updateTicket(ticketId, data);
+  // Whitelist fields
+  const updateData = {};
+  if (data.status !== undefined) {
+    updateData.status = data.status;
+    if (data.status === 'RESOLVED') {
+      updateData.resolvedAt = new Date();
+      updateData.resolvedById = userId;
+    }
+    if (data.status === 'CLOSED') {
+      updateData.closedAt = new Date();
+    }
+  }
+  if (data.priority !== undefined) updateData.priority = data.priority;
+  if (data.assigneeId !== undefined) updateData.assigneeId = data.assigneeId;
+  if (data.resolutionNote !== undefined) {
+    updateData.resolutionNote = data.resolutionNote;
+  }
+
+  const updated = await ticketDb.updateTicket(ticketId, updateData);
 
   await audit.log({
     organizationId,
@@ -177,9 +268,9 @@ const updateTicket = async (userId, organizationId, ticketId, data) => {
     resource: 'support_ticket',
     resourceId: ticketId,
     metadata: {
-      updatedFields: Object.keys(data),
-      status: data.status,
-      priority: data.priority,
+      updatedFields: Object.keys(updateData),
+      status: updateData.status,
+      priority: updateData.priority,
     },
   });
 
@@ -199,7 +290,6 @@ const addMessage = async (
 ) => {
   const ticket = await getTicketById(userId, organizationId, ticketId);
 
-  // Internal notes require manage permission.
   if (isInternal) {
     const hasManage = await checkPermission(
       userId,
@@ -227,7 +317,7 @@ const addMessage = async (
     metadata: { ticketId, isInternal },
   });
 
-  // Notify ticket author when someone else replies.
+  // Notify the reporter if someone else replied
   if (ticket.userId !== userId) {
     await notifications.send({
       userId: ticket.userId,
@@ -240,7 +330,8 @@ const addMessage = async (
     });
   }
 
-  // Also notify the org owner if the reply came from someone else.
+  // Notify the owner if the reply came from someone else, and
+  // the owner isn't already the reporter
   const organization = await orgDb.findOrganizationById(organizationId);
   if (
     organization &&

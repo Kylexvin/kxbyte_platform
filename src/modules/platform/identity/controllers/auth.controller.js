@@ -20,7 +20,7 @@ const register = async (req, res) => {
   }
 
   try {
-    const result = await authService.register(req.body);
+    const result = await authService.register(req.body, req);
 
     if (isBrowserFlow) {
       return res.redirect(
