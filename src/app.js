@@ -8,6 +8,7 @@ import morgan from 'morgan';
 import session from 'express-session';
 import passport from './modules/platform/identity/config/passport.config.js';
 import platformPermissions from './modules/platform/permissions.js';
+import { seedSupportCategories } from './modules/platform/support/seed/categories.seed.js';
 
 // ============================================================
 // PLATFORM MODULES
@@ -221,6 +222,8 @@ app.get('/health', (req, res) => {
 export async function initializeProducts() {
   await authorization.registerPermissions('platform', platformPermissions);
   console.log(`Registered ${platformPermissions.length} platform permissions`);
+
+  await seedSupportCategories();
 
   for (const [key, product] of Object.entries(productRegistry)) {
     if (product.permissions?.length) {

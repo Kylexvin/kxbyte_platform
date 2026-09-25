@@ -3,8 +3,21 @@
 import ticketDb from '../db/ticket.db.js';
 import categoryDb from '../db/category.db.js';
 import orgDb from '../../organizations/db/org.db.js';
+import authorizationService from '../../authorization/services/authorization.service.js';
 import audit from '../../audit/index.js';
 import notifications from '../../notifications/index.js';
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+const checkPermission = async (userId, organizationId, key) => {
+  return authorizationService.checkPermission(userId, organizationId, key);
+};
+
+// ============================================================
+// CREATE TICKET
+// ============================================================
 
 const createTicket = async (userId, organizationId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
@@ -15,6 +28,15 @@ const createTicket = async (userId, organizationId, data) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
+  }
+
+  const hasCreate = await checkPermission(
+    userId,
+    organizationId,
+    'support.tickets.create'
+  );
+  if (!hasCreate) {
+    throw new Error('You do not have permission to create tickets');
   }
 
   const category = await categoryDb.findCategoryById(data.categoryId);
@@ -33,7 +55,6 @@ const createTicket = async (userId, organizationId, data) => {
     productKey: data.productKey || null,
   });
 
-  // Audit log
   await audit.log({
     organizationId,
     userId,
@@ -44,29 +65,38 @@ const createTicket = async (userId, organizationId, data) => {
       title: ticket.title,
       category: category.name,
       priority: ticket.priority,
+      productKey: ticket.productKey,
     },
   });
 
-  // Send notification to organization owner
-  const owner = await orgDb.findUserById(organization.ownerId);
-  if (owner) {
-    await notifications.send({
-      userId: owner.id,
-      organizationId,
-      type: 'SUPPORT_TICKET_NEW',
-      title: `New Support Ticket: ${ticket.title}`,
-      message: `${membership.user?.firstName || 'A member'} created a ticket: ${ticket.title}`,
-      channel: 'IN_APP',
-      metadata: {
-        ticketId: ticket.id,
-        ticketTitle: ticket.title,
-        createdBy: membership.userId,
-      },
-    });
+  // Notify the org owner (unless they created it themselves)
+  if (organization.ownerId !== userId) {
+    const owner = await orgDb.findUserById(organization.ownerId);
+    if (owner) {
+      await notifications.send({
+        userId: owner.id,
+        organizationId,
+        type: 'SUPPORT_TICKET_NEW',
+        title: `New Support Ticket: ${ticket.title}`,
+        message: `${membership.user?.firstName || 'A member'} created a ticket: ${ticket.title}`,
+        channel: 'IN_APP',
+        metadata: {
+          ticketId: ticket.id,
+          ticketTitle: ticket.title,
+          createdBy: membership.userId,
+        },
+      });
+    }
   }
 
   return ticket;
 };
+
+// ============================================================
+// LIST TICKETS
+// ============================================================
+// Members with `support.tickets.view` see all org tickets.
+// Everyone else sees only their own.
 
 const getTickets = async (userId, organizationId, filters = {}) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -74,17 +104,22 @@ const getTickets = async (userId, organizationId, filters = {}) => {
     throw new Error('You do not have access to this organization');
   }
 
-  const organization = await orgDb.findOrganizationById(organizationId);
-  const isOwner = organization?.ownerId === userId;
+  const hasViewAll = await checkPermission(
+    userId,
+    organizationId,
+    'support.tickets.view'
+  );
 
-  // If owner, see all tickets for organization
-  // If member, see only their own tickets
-  if (isOwner) {
+  if (hasViewAll) {
     return ticketDb.findTicketsByOrganization(organizationId, filters);
-  } else {
-    return ticketDb.findTicketsByUser(userId, filters);
   }
+
+  return ticketDb.findTicketsByUser(userId, filters);
 };
+
+// ============================================================
+// GET ONE TICKET
+// ============================================================
 
 const getTicketById = async (userId, organizationId, ticketId) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -101,26 +136,36 @@ const getTicketById = async (userId, organizationId, ticketId) => {
     throw new Error('You do not have access to this ticket');
   }
 
-  const organization = await orgDb.findOrganizationById(organizationId);
-  const isOwner = organization?.ownerId === userId;
+  // Author always has access.
+  if (ticket.userId === userId) return ticket;
 
-  // Owner can view all tickets, members can only view their own
-  if (!isOwner && ticket.userId !== userId) {
+  // Otherwise, needs view permission.
+  const hasViewAll = await checkPermission(
+    userId,
+    organizationId,
+    'support.tickets.view'
+  );
+  if (!hasViewAll) {
     throw new Error('You do not have access to this ticket');
   }
 
   return ticket;
 };
 
+// ============================================================
+// UPDATE TICKET
+// ============================================================
+
 const updateTicket = async (userId, organizationId, ticketId, data) => {
-  const ticket = await getTicketById(userId, organizationId, ticketId);
+  await getTicketById(userId, organizationId, ticketId);
 
-  const organization = await orgDb.findOrganizationById(organizationId);
-  const isOwner = organization?.ownerId === userId;
-
-  // Only owner can update status/priority
-  if (!isOwner) {
-    throw new Error('Only the organization owner can update ticket status');
+  const hasManage = await checkPermission(
+    userId,
+    organizationId,
+    'support.tickets.manage'
+  );
+  if (!hasManage) {
+    throw new Error('You do not have permission to update tickets');
   }
 
   const updated = await ticketDb.updateTicket(ticketId, data);
@@ -141,34 +186,67 @@ const updateTicket = async (userId, organizationId, ticketId, data) => {
   return updated;
 };
 
-const addMessage = async (userId, organizationId, ticketId, message, isInternal = false) => {
+// ============================================================
+// ADD MESSAGE
+// ============================================================
+
+const addMessage = async (
+  userId,
+  organizationId,
+  ticketId,
+  message,
+  isInternal = false
+) => {
   const ticket = await getTicketById(userId, organizationId, ticketId);
 
-  const messageData = {
+  // Internal notes require manage permission.
+  if (isInternal) {
+    const hasManage = await checkPermission(
+      userId,
+      organizationId,
+      'support.tickets.manage'
+    );
+    if (!hasManage) {
+      throw new Error('You do not have permission to add internal notes');
+    }
+  }
+
+  const newMessage = await ticketDb.createMessage({
     ticketId,
     userId,
     message,
     isInternal,
-  };
+  });
 
-  const newMessage = await ticketDb.createMessage(messageData);
-
-  // Audit log
   await audit.log({
     organizationId,
     userId,
     action: 'SUPPORT_TICKET_MESSAGE_ADDED',
     resource: 'support_message',
     resourceId: newMessage.id,
-    metadata: {
-      ticketId,
-      isInternal,
-    },
+    metadata: { ticketId, isInternal },
   });
 
-  // Notify the owner if it's a reply from a member
+  // Notify ticket author when someone else replies.
+  if (ticket.userId !== userId) {
+    await notifications.send({
+      userId: ticket.userId,
+      organizationId,
+      type: 'SUPPORT_TICKET_REPLY',
+      title: `New reply on ticket: ${ticket.title}`,
+      message: `A new message was added to ticket "${ticket.title}"`,
+      channel: 'IN_APP',
+      metadata: { ticketId, ticketTitle: ticket.title },
+    });
+  }
+
+  // Also notify the org owner if the reply came from someone else.
   const organization = await orgDb.findOrganizationById(organizationId);
-  if (organization && organization.ownerId !== userId) {
+  if (
+    organization &&
+    organization.ownerId !== userId &&
+    organization.ownerId !== ticket.userId
+  ) {
     await notifications.send({
       userId: organization.ownerId,
       organizationId,
@@ -176,10 +254,7 @@ const addMessage = async (userId, organizationId, ticketId, message, isInternal 
       title: `New reply on ticket: ${ticket.title}`,
       message: `A new message was added to ticket "${ticket.title}"`,
       channel: 'IN_APP',
-      metadata: {
-        ticketId,
-        ticketTitle: ticket.title,
-      },
+      metadata: { ticketId, ticketTitle: ticket.title },
     });
   }
 

@@ -81,21 +81,26 @@ const platformPermissions = [
     description: 'Manage organization subscriptions',
   },
 
-  // ============================================================
-  // SUPPORT
-  // ============================================================
-  {
-    key: 'support.tickets.view',
-    name: 'View Support Tickets',
-    description: 'View support tickets',
-  },
-  {
-    key: 'support.tickets.create',
-    name: 'Create Support Tickets',
-    description: 'Create support tickets',
-  },
 
-  // ============================================================
+// SUPPORT
+// ============================================================
+{
+  key: 'support.tickets.view',
+  name: 'View Support Tickets',
+  description: 'View support tickets and replies',
+},
+{
+  key: 'support.tickets.create',
+  name: 'Create Support Tickets',
+  description: 'Create new support tickets',
+},
+{
+  key: 'support.tickets.manage',
+  name: 'Manage Support Tickets',
+  description: 'Update ticket status, priority, and post internal notes',
+},
+
+// ============================================================
 // SETTINGS
 // ============================================================
 {

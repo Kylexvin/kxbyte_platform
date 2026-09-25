@@ -32,6 +32,14 @@ const deleteCategory = async (id) => {
   });
 };
 
+const upsertCategoryByName = async ({ name, description, slug }) => {
+  return prisma.supportCategory.upsert({
+    where: { slug },
+    update: { name, description, isActive: true },
+    create: { name, description, slug, isActive: true },
+  });
+};
+
 export default {
   createCategory,
   findCategoryById,
@@ -39,4 +47,5 @@ export default {
   findAllCategories,
   updateCategory,
   deleteCategory,
+  upsertCategoryByName,
 };

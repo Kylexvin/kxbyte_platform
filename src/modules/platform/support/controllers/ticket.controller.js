@@ -25,6 +25,9 @@ const createTicket = async (req, res) => {
     if (error.message === 'You do not have access to this organization') {
       return res.status(403).json({ error: error.message });
     }
+    if (error.message === 'You do not have permission to create tickets') {
+      return res.status(403).json({ error: error.message });
+    }
     console.error('Create ticket error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -105,7 +108,7 @@ const updateTicket = async (req, res) => {
         error.message === 'You do not have access to this organization') {
       return res.status(403).json({ error: error.message });
     }
-    if (error.message === 'Only the organization owner can update ticket status') {
+    if (error.message === 'You do not have permission to update tickets') {
       return res.status(403).json({ error: error.message });
     }
     console.error('Update ticket error:', error);
@@ -143,6 +146,9 @@ const addMessage = async (req, res) => {
     }
     if (error.message === 'You do not have access to this ticket' ||
         error.message === 'You do not have access to this organization') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'You do not have permission to add internal notes') {
       return res.status(403).json({ error: error.message });
     }
     console.error('Add message error:', error);
