@@ -210,72 +210,119 @@ const getLowStockProducts = async (organizationId) => {
 const getBranchProducts = async (branchId, filters = {}) => {
   const { limit = 50, offset = 0, search, category, includeUnavailable } = filters;
 
-  const where = {
-    branchId,
-    product: {
-      isActive: true,
-    },
-  };
-
-  if (!includeUnavailable) {
-    where.isAvailable = true;
-  }
-
+  // Build the product-level where clause. We iterate PRODUCTS (not branch
+  // products) so a branch sees the global catalog even before it has a
+  // branch_products row. Products with no row appear with stock 0.
+  const productWhere = { isActive: true };
   if (search) {
-    where.product.OR = [
+    productWhere.OR = [
       { name: { contains: search, mode: 'insensitive' } },
-      { displayName: { contains: search, mode: 'insensitive' } },
       { sku: { contains: search, mode: 'insensitive' } },
+      { units: { some: { barcode: { contains: search, mode: 'insensitive' } } } },
     ];
   }
-  if (category) {
-    where.product.category = category;
+  if (category) productWhere.category = category;
+
+  // When the caller doesn't want unavailable items, we still need to
+  // include products with NO branch row (they're implicitly available).
+  // So we don't filter at the product level on availability — we filter
+  // after mapping.
+  const products = await prisma.kxTillProduct.findMany({
+    where: {
+      ...productWhere,
+      branchProducts: { some: { branchId } },
+    },
+    include: {
+      units: true,
+      baseUnit: true,
+      branchProducts: {
+        where: { branchId },
+        include: { branch: true },
+      },
+    },
+    orderBy: { name: 'asc' },
+    skip: offset,
+    take: limit,
+  });
+
+  // Second query: products with no branch row for this branch.
+  // Only run when we still have room in the page and caller allows it.
+  // (includeUnavailable doesn't apply — these are available-by-default.)
+  let orphanProducts = [];
+  if (products.length < limit) {
+    const remaining = limit - products.length;
+    orphanProducts = await prisma.kxTillProduct.findMany({
+      where: {
+        ...productWhere,
+        branchProducts: { none: { branchId } },
+      },
+      include: {
+        units: true,
+        baseUnit: true,
+      },
+      orderBy: { name: 'asc' },
+      take: remaining,
+    });
   }
 
-  const [items, total] = await Promise.all([
-    prisma.kxTillBranchProduct.findMany({
-      where,
-      include: {
-        product: {
-          include: {
-            units: true,
-            baseUnit: true,
-          },
-        },
-        branch: true,
-      },
-      orderBy: {
-        product: {
-          name: 'asc',
-        },
-      },
-      skip: offset,
-      take: limit,
-    }),
-    prisma.kxTillBranchProduct.count({ where }),
-  ]);
-
-  return {
-    items: items.map((bp) => ({
-      id: bp.id,
-      productId: bp.productId,
-      name: bp.product.name,
-      displayName: bp.displayName,
-      sku: bp.product.sku,
-      category: bp.product.category,
-      price: bp.price,
-      stock: bp.stock,
-      minStock: bp.minStock,
-      isAvailable: bp.isAvailable,
-      units: bp.product.units,
-      baseUnit: bp.product.baseUnit,
-      branchId: bp.branchId,
-      branchName: bp.branch.name,
-    })),
-    total,
-    limit,
-    offset,
+  const mapWithRow = (p) => {
+    const bp = p.branchProducts[0];
+    return {
+      id: bp?.id || `bp:${p.id}:${branchId}`,
+      productId: p.id,
+      name: p.name,
+      displayName: bp?.displayName || p.name,
+      sku: p.sku,
+      category: p.category,
+      price: p.baseUnit?.price ?? 0,
+      stock: bp?.stock ?? 0,
+      minStock: bp?.minStock ?? 0,
+      isAvailable: bp?.isAvailable ?? true,
+      units: p.units,
+      baseUnit: p.baseUnit,
+      branchId,
+      branchName: bp?.branch?.name || 'Unknown',
+    };
   };
+
+  const mapOrphan = (p) => ({
+    id: `bp:${p.id}:${branchId}`,
+    productId: p.id,
+    name: p.name,
+    displayName: p.name,
+    sku: p.sku,
+    category: p.category,
+    price: p.baseUnit?.price ?? 0,
+    stock: 0,
+    minStock: 0,
+    isAvailable: true,
+    units: p.units,
+    baseUnit: p.baseUnit,
+    branchId,
+    branchName: 'Unknown',
+  });
+
+  let items = [
+    ...products.map(mapWithRow),
+    ...orphanProducts.map(mapOrphan),
+  ];
+
+  // Post-filter on availability for products that DO have a row.
+  // Products with no row are always available, so they survive.
+  if (!includeUnavailable) {
+    items = items.filter((it) => it.isAvailable !== false);
+  }
+
+  // Re-sort merged results by name (two queries can interleave).
+  items.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  const total = await prisma.kxTillProduct.count({
+    where: { ...productWhere, branchProducts: { none: { branchId } } },
+  }) + await prisma.kxTillProduct.count({
+    where: { ...productWhere, branchProducts: { some: { branchId } } },
+  });
+
+  return { items, total, limit, offset };
 };
 
 const updateBranchProductStock = async (branchProductId, data) => {
