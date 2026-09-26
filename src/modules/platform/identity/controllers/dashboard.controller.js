@@ -109,7 +109,7 @@ const getDashboardContext = async (req, res) => {
         currency: organization.currency,
         timezone: organization.timezone,
         logo: organization.logo,
-      },
+      }, 
       membership: {
         id: membership.id,
         roleId: membership.roleId,

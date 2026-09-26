@@ -11,15 +11,15 @@ import prisma from '../../../../database/postgres/prisma.js';
 // ============================================================
 
 const PAYMENT = {
-  paybill: '247247',
-  accountNumberPrefix: 'KXBYTE-',
+  paybill: null,
+  accountNumberPrefix: null,
   tillNumber: null,
-  mpesaPhone: '0712345678',
-  bankName: 'Equity Bank',
-  bankAccount: '0123456789',
-  bankAccountName: 'KxByte Ltd',
+  mpesaPhone: '0745276898',
+  bankName: 'I&M Bank',
+  bankAccount: '00108456156150',
+  bankAccountName: 'Vincent Kipchirchir',
   contactEmail: 'admin@kxbyte.co.ke',
-  contactPhone: '+254712345678',
+  contactPhone: '+254768610613',
 };
 
 // ============================================================
