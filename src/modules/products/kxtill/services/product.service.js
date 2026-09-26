@@ -416,25 +416,29 @@ const updateBranchProductStock = async (organizationId, userId, branchId, produc
     throw new Error('You do not have permission to update inventory');
   }
 
-  const branchProduct = await prisma.kxTillBranchProduct.findFirst({
-    where: {
-      productId,
-      branchId,
-      product: {
-        organizationId,
-      },
-    },
+  // Verify the product actually belongs to this org before touching stock.
+  const product = await prisma.kxTillProduct.findFirst({
+    where: { id: productId, organizationId, isActive: true },
+    select: { id: true },
   });
-
-  if (!branchProduct) {
-    throw new Error('Branch product not found');
+  if (!product) {
+    throw new Error('Product not found');
   }
 
-  const updated = await prisma.kxTillBranchProduct.update({
-    where: { id: branchProduct.id },
-    data: {
+  const updated = await prisma.kxTillBranchProduct.upsert({
+    where: {
+      productId_branchId: { productId, branchId },
+    },
+    update: {
       stock: stockData.stock,
-      minStock: stockData.minStock !== undefined ? stockData.minStock : branchProduct.minStock,
+      ...(stockData.minStock !== undefined ? { minStock: stockData.minStock } : {}),
+    },
+    create: {
+      productId,
+      branchId,
+      stock: stockData.stock ?? 0,
+      minStock: stockData.minStock ?? 0,
+      isAvailable: true,
     },
   });
 
@@ -443,12 +447,11 @@ const updateBranchProductStock = async (organizationId, userId, branchId, produc
     userId,
     action: 'KXTILL_BRANCH_STOCK_UPDATED',
     resource: 'branch_product',
-    resourceId: branchProduct.id,
+    resourceId: updated.id,
     metadata: {
       productId,
       branchId,
-      oldStock: branchProduct.stock,
-      newStock: stockData.stock,
+      newStock: updated.stock,
     },
   });
 
