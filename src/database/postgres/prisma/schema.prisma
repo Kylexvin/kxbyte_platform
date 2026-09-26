@@ -24,6 +24,8 @@ model User {
   memberships        Membership[]
   sentInvitations    Invitation[] @relation("InvitationSender")
 
+  authoredSupportGuides SupportGuide[] @relation("GuideAuthor")
+
   sessions          Session[]
   verificationTokens VerificationToken[]
   auditEvents       AuditEvent[]
@@ -1015,6 +1017,31 @@ model SupportMessage {
   @@index([ticketId])
   @@map("support_messages")
 }
+
+model SupportGuide {
+  id           String   @id @default(uuid())
+  slug         String   @unique
+  title        String
+  summary      String
+  body         String?
+  url          String?
+  category     String
+  productKey   String?
+  order        Int      @default(0)
+  isPublished  Boolean  @default(true)
+
+  authorId     String?
+  author       User?    @relation("GuideAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category])
+  @@index([productKey])
+  @@index([isPublished])
+  @@map("support_guides")
+}
+
 // ============================================================
 // SOCIAL AUTH
 // ============================================================

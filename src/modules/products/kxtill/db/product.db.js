@@ -371,44 +371,37 @@ const findProductsForSync = async (organizationId, since, limit, offset, branchI
     include: {
       units: true,
       baseUnit: true,
-      branchProducts: {
-        where: {
-          isAvailable: true,
-          ...(branchId ? { branchId } : {}),
-        },
-        include: {
-          branch: true,
-        },
-      },
+      branchProducts: branchId
+        ? { where: { branchId }, include: { branch: true } }
+        : false,
     },
     orderBy: { updatedAt: 'asc' },
     skip: offset,
     take: limit,
   });
 
-  const items = [];
-  for (const product of products) {
-    for (const bp of product.branchProducts) {
-      items.push({
-        id: bp.id,
-        productId: product.id,
-        name: product.name,
-        displayName: bp.displayName || product.name,
-        sku: product.sku,
-        category: product.category,
-        stock: bp.stock,
-        minStock: bp.minStock,
-        isAvailable: bp.isAvailable,
-        units: product.units,
-        baseUnit: product.baseUnit,
-        branchId: bp.branchId,
-        branchName: bp.branch?.name || 'Unknown',
-        updatedAt: bp.updatedAt,
-      });
-    }
-  }
+  const items = products.map((product) => {
+    const bp = product.branchProducts?.[0] || null;
+    return {
+      id: bp?.id || `bp:${product.id}:${branchId}`,
+      productId: product.id,
+      name: product.name,
+      displayName: bp?.displayName || product.name,
+      sku: product.sku,
+      category: product.category,
+      stock: bp?.stock ?? 0,
+      minStock: bp?.minStock ?? 0,
+      isAvailable: bp?.isAvailable ?? true,
+      units: product.units,
+      baseUnit: product.baseUnit,
+      branchId,
+      branchName: bp?.branch?.name || 'Unknown',
+      updatedAt: bp?.updatedAt || product.updatedAt,
+    };
+  });
 
-  return { items, total: items.length, limit, offset };
+  const total = await prisma.kxTillProduct.count({ where });
+  return { items, total, limit, offset };
 };
 
 export default {
