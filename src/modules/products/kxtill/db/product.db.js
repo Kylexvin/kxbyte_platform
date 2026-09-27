@@ -378,7 +378,7 @@ const findProductByBarcode = async (barcode, organizationId, branchId) => {
 const findBranchProductsForSync = async (organizationId, branchId, since) => {
   const where = {
     branchId,
-    isAvailable: true,
+    
     product: {
       organizationId,
     },
