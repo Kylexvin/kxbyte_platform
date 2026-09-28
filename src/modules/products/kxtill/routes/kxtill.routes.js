@@ -11,6 +11,7 @@ import transferController from '../transfer/controllers/transfer.controller.js';
 import staffController from '../controllers/staff.controller.js';
 import customerController from '../controllers/customer.controller.js';
 import branchController from '../controllers/branch.controller.js';
+import dashboardSyncController from '../controllers/dashboardSync.controller.js';
 import billingController from '../controllers/billing.controller.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 import subscriptionMiddleware from '../../../platform/subscriptions/middleware/subscription.middleware.js';
@@ -61,11 +62,12 @@ router.get('/sales/:saleId', guard, saleController.getSale);
 router.post('/sales/:saleId/refund', guard, saleController.refundSale);
 router.get('/sales/:saleId/receipt', guard, receiptController.generateReceipt);
 
-// ============================================================
+
 // SYNC ROUTES
 // ============================================================
 router.get('/sync/products', guard, productController.getProductsForSync);
 router.get('/sync/branch-products', guard, productController.getBranchProductsForSync);
+router.get('/sync/dashboard', guard, dashboardSyncController.getDashboardSnapshot);
 
 // ============================================================
 // TRANSFER ROUTES
