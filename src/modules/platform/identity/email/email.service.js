@@ -335,7 +335,7 @@ export const sendPasswordResetConfirmation = async (email, firstName) => {
 };
 
 export const sendInvitationEmail = async (email, token, organizationName, inviterName) => {
-  const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:5000'}/accept-invitation?token=${token}`;
+  const inviteUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/onboarding/accept-invitation?token=${token}`;
 
   const bodyHtml = `
     <p style="margin:0 0 16px;">Hi there,</p>
