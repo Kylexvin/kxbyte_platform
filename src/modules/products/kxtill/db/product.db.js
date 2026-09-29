@@ -435,7 +435,10 @@ const findProductsForSync = async (organizationId, since, limit, offset, branchI
       name: product.name,
       displayName: bp?.displayName || product.name,
       sku: product.sku,
+      description: product.description,
       category: product.category,
+      taxRate: product.taxRate,
+      cost: product.cost ?? 0,
       stock: bp?.stock ?? 0,
       minStock: bp?.minStock ?? 0,
       isAvailable: bp?.isAvailable ?? true,
@@ -450,6 +453,7 @@ const findProductsForSync = async (organizationId, since, limit, offset, branchI
   const total = await prisma.kxTillProduct.count({ where });
   return { items, total, limit, offset };
 };
+
 
 export default {
   createProduct,
