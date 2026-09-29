@@ -96,7 +96,8 @@ app.use((req, res, next) => {
   const isAuthUIPage =
     req.path.startsWith('/api/v1/auth/oauth') ||
     req.path === '/api/v1/auth/register' ||
-    req.path === '/api/v1/auth/forgot-password';
+    req.path === '/api/v1/auth/forgot-password' ||
+    req.path === '/api/v1/auth/reset-password';
 
   if (isAuthUIPage) {
     res.setHeader(
