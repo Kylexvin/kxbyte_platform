@@ -109,7 +109,8 @@ app.use((req, res, next) => {
     req.path.startsWith('/api/v1/auth/oauth') ||
     req.path === '/api/v1/auth/register' ||
     req.path === '/api/v1/auth/forgot-password' ||
-    req.path === '/api/v1/auth/reset-password';
+    req.path === '/api/v1/auth/reset-password' ||
+    req.path === '/api/v1/auth/verify-email'; 
 
   if (isAuthUIPage) {
     res.setHeader(

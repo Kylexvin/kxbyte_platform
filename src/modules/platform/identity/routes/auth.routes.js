@@ -42,6 +42,7 @@ router.post('/forgot-password/html', passwordResetLimiter, oauthController.forgo
 router.get('/reset-password', oauthController.resetPasswordPage);
 router.post('/reset-password/html', passwordResetLimiter, oauthController.resetPasswordSubmit);
 router.get('/register', oauthController.registerPage);
+router.get('/verify-email', oauthController.verifyEmailPage);
 
 // ============================================================
 // STANDARD AUTH (JSON API)
@@ -53,7 +54,7 @@ router.post('/refresh', authController.refresh);
 router.post('/logout', authController.logout);
 router.post('/forgot-password', passwordResetLimiter, authController.forgotPassword);
 router.post('/reset-password', authController.resetPassword);
-router.get('/verify-email', authController.verifyEmail);
+
 
 // ============================================================
 // PROTECTED ROUTES

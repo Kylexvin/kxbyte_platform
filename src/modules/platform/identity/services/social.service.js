@@ -36,6 +36,25 @@ const findOrCreateUser = async (profile, provider) => {
       name: displayName || `${name?.givenName || ''} ${name?.familyName || ''}`.trim(),
       avatar: photos?.[0]?.value || null,
     });
+
+    // If they weren't verified and just proved email ownership via a trusted
+    // provider, upgrade them. Never downgrade — if already verified, leave it.
+    if (!user.isEmailVerified) {
+      user = await authDb.updateUser(user.id, { isEmailVerified: true });
+
+      await audit.log({
+        organizationId: null,
+        userId: user.id,
+        action: 'EMAIL_VERIFIED',
+        resource: 'user',
+        resourceId: user.id,
+        metadata: {
+          source: provider,
+          reason: 'social_link_upgrade',
+        },
+      });
+    }
+
     return user;
   }
 
@@ -94,7 +113,7 @@ const loginWithSocial = async (profile, provider) => {
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
   });
 
-  // ✅ Get user's organizations
+  // Get user's organizations
   const organizations = await authDb.findOrganizationsByUserId(user.id);
 
   const formattedOrgs = organizations.map((org) => ({
@@ -109,7 +128,7 @@ const loginWithSocial = async (profile, provider) => {
     user: userWithoutPassword,
     accessToken,
     refreshToken,
-    organizations: formattedOrgs, // ✅ Add organizations
+    organizations: formattedOrgs,
   };
 };
 

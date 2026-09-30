@@ -419,6 +419,139 @@ const resetPasswordPage = async (req, res) => {
 };
 
 /**
+ * GET /auth/verify-email - Render email verification page
+ * Query: token (required), error (optional: invalid_token | already_verified)
+ */
+const verifyEmailPage = async (req, res) => {
+  const { token, error } = req.query;
+
+  if (!token && !error) {
+    return res.redirect(`${AUTH_BASE_URL}/api/v1/auth/verify-email?error=invalid_token`);
+  }
+
+  // If no error yet and we have a token, run verification inline.
+  // This keeps the flow to a single page: click email link → success screen.
+  let state = 'pending';
+  let errorMessage = '';
+
+  if (error === 'invalid_token') {
+    state = 'error';
+    errorMessage = 'This verification link is invalid or has expired. Request a new one below.';
+  } else if (error === 'already_verified') {
+    state = 'success';
+  } else if (token) {
+    try {
+      await authService.verifyEmail(token, req);
+      state = 'success';
+    } catch (err) {
+      console.error('Verify email error:', err.message);
+      state = 'error';
+      errorMessage = 'This verification link is invalid, expired, or already used.';
+    }
+  }
+
+  const isSuccess = state === 'success';
+  const isError = state === 'error';
+
+  const iconSvg = isSuccess
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="#4CAF50" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+    : isError
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="#ef5350" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none" stroke="#d9a84e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>';
+
+  const title = isSuccess ? 'Email verified' : isError ? 'Verification failed' : 'Verifying…';
+  const message = isSuccess
+    ? 'Your email has been verified. You can now sign in to any KXBYTE product.'
+    : isError
+      ? errorMessage
+      : 'Please wait…';
+
+  let html = '<!DOCTYPE html>\n';
+  html += '<html>\n<head>\n';
+  html += '<meta charset="UTF-8">\n';
+  html += '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n';
+  html += '<title>Email Verification - KXBYTE</title>\n';
+  html += '<style>\n';
+  html += '  * { margin: 0; padding: 0; box-sizing: border-box; }\n';
+  html += '  body { font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; background: #0e0f13; color: #eceef2; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 32px 20px; position: relative; overflow: hidden; }\n';
+  html += '  body::before { content: ""; position: absolute; border-radius: 50%; filter: blur(90px); pointer-events: none; z-index: 0; width: 460px; height: 460px; top: -140px; right: 10%; background: radial-gradient(circle, rgba(217, 168, 78, 0.18) 0%, rgba(255, 106, 43, 0.06) 55%, transparent 75%); }\n';
+  html += '  .card { position: relative; z-index: 1; width: 100%; max-width: 440px; border-radius: 28px; background: linear-gradient(180deg, rgba(27, 28, 35, 0.72), rgba(22, 23, 29, 0.6)); border: 1px solid rgba(255, 255, 255, 0.14); backdrop-filter: blur(28px); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55); padding: 40px 36px; text-align: center; }\n';
+  html += '  .icon-wrap { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 16px; display: flex; align-items: center; justify-content: center; background: ' + (isSuccess ? 'rgba(76, 175, 80, 0.15)' : isError ? 'rgba(239, 83, 80, 0.15)' : 'linear-gradient(150deg, rgba(217, 168, 78, 0.15), rgba(255, 106, 43, 0.15))') + '; }\n';
+  html += '  .icon-wrap svg { width: 30px; height: 30px; }\n';
+  html += '  h2 { font-size: 22px; font-weight: 600; margin: 0 0 8px; color: #eceef2; }\n';
+  html += '  p { font-size: 14px; color: #a3a5b0; line-height: 1.55; margin: 0 0 20px; }\n';
+  html += '  .btn { display: inline-block; padding: 12px 28px; border-radius: 12px; border: none; color: #17181e; font-size: 14px; font-weight: 700; background: linear-gradient(150deg, #d9a84e, #ff6a2b); cursor: pointer; box-shadow: 0 8px 20px rgba(255, 106, 43, 0.32); text-decoration: none; transition: transform 0.15s ease; }\n';
+  html += '  .btn:hover { transform: translateY(-1px); }\n';
+  html += '  .close-btn { position: fixed; top: 12px; right: 16px; background: transparent; border: none; color: #62636e; font-size: 22px; cursor: pointer; padding: 4px 8px; }\n';
+  html += '  .close-btn:hover { color: #eceef2; }\n';
+  html += '  @media (max-width: 480px) { .card { padding: 28px 20px; } h2 { font-size: 20px; } }\n';
+  html += '</style>\n</head>\n<body>\n';
+  html += '  <div class="card">\n';
+  html += '    <div class="icon-wrap">' + iconSvg + '</div>\n';
+  html += '    <h2>' + title + '</h2>\n';
+  html += '    <p>' + message + '</p>\n';
+
+  if (isSuccess) {
+    html += '    <button class="btn" onclick="window.close()">Close</button>\n';
+  } else {
+    html += '    <p style="font-size:12px;color:#62636e;">Sign in and use the "Resend verification email" option if available.</p>\n';
+  }
+
+  html += '  </div>\n';
+  html += '  <script>\n';
+  html += '    if (window.opener) {\n';
+  html += '      const btn = document.createElement("button");\n';
+  html += '      btn.className = "close-btn";\n';
+  html += '      btn.textContent = "×";\n';
+  html += '      btn.onclick = function() { window.close(); };\n';
+  html += '      document.body.appendChild(btn);\n';
+  html += '    }\n';
+  html += '  </script>\n';
+  html += '</body>\n</html>';
+
+  res.send(html);
+};
+
+/**
+ * POST /auth/verify-email/resend - Resend verification email
+ * Requires an authenticated user OR a logged-out email lookup flow (your choice)
+ */
+const resendVerificationEmail = async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email required' });
+  }
+
+  try {
+    const user = await authDb.findActiveUserByEmail(email.toLowerCase().trim());
+
+    if (user && !user.isEmailVerified) {
+      const crypto = await import('crypto');
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+      await authDb.createVerificationToken({
+        userId: user.id,
+        token: hashedToken,
+        type: 'EMAIL_VERIFICATION',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+
+      // Reuse whatever sends the email in auth.service
+      const emailService = await import('../email/email.service.js');
+      await emailService.sendVerificationEmail(user.email, rawToken, user.firstName);
+    }
+
+    // Always return success (prevent enumeration)
+    res.json({ message: 'If that email is registered and unverified, a new link has been sent.' });
+  } catch (err) {
+    console.error('Resend verification error:', err.message);
+    res.status(500).json({ error: 'Failed to send verification email' });
+  }
+};
+
+/**
  * POST /auth/reset-password/html - Handle password reset form submission
  */
 const resetPasswordSubmit = async (req, res) => {
@@ -1133,6 +1266,9 @@ export default {
   resetPasswordPage,
   resetPasswordSubmit,
   registerPage,
+
+  verifyEmailPage,         
+  resendVerificationEmail,
 
   // OAuth flow
   authorize,
