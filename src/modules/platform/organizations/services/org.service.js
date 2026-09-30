@@ -10,29 +10,38 @@ import prisma from '../../../../database/postgres/prisma.js';
 
 
 
+function normalizePhone(phone) {
+  if (!phone) return null;
+  const trimmed = String(phone).trim();
+  if (!trimmed) return null;
+  const hasPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/\D/g, '');
+  return hasPlus ? `+${digits}` : digits;
+}
+
 const createOrganization = async (userId, data) => {
-  const { name, country } = data;
+  const { name, country, phone } = data;
 
   const slug = await generateSlug(name);
   const defaults = getCountryDefaults(country);
 
   const organization = await orgDb.createOrganization({
-    name,
+    name: name.trim(),
     slug,
     ownerId: userId,
     country: country.toUpperCase(),
     currency: defaults.currency,
     timezone: defaults.timezone,
+    phone: normalizePhone(phone),
   });
 
   const membership = await orgDb.createMembership({
     userId,
     organizationId: organization.id,
     isActive: true,
-    hasAllBranches: true, // Owner has access to all branches
+    hasAllBranches: true,
   });
 
- 
   const defaultBranch = await prisma.branch.create({
     data: {
       organizationId: organization.id,
@@ -46,10 +55,9 @@ const createOrganization = async (userId, data) => {
     },
   });
 
-  // Audit log: Organization created
   await audit.log({
     organizationId: organization.id,
-    userId: userId,
+    userId,
     action: 'ORGANIZATION_CREATED',
     resource: 'organization',
     resourceId: organization.id,
@@ -57,13 +65,13 @@ const createOrganization = async (userId, data) => {
       name: organization.name,
       slug: organization.slug,
       country: organization.country,
+      phone: organization.phone, // useful for support follow-ups
     },
   });
 
-  // Audit log: Default branch created
   await audit.log({
     organizationId: organization.id,
-    userId: userId,
+    userId,
     action: 'BRANCH_CREATED',
     resource: 'branch',
     resourceId: defaultBranch.id,
@@ -73,11 +81,7 @@ const createOrganization = async (userId, data) => {
     },
   });
 
-  return {
-    organization,
-    membership,
-    defaultBranch,
-  };
+  return { organization, membership, defaultBranch };
 };
 
 const getOrganizations = async (userId) => {

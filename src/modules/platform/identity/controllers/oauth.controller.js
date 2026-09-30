@@ -1,5 +1,38 @@
 // src/modules/platform/identity/controllers/oauth.controller.js
-
+/**
+ * ============================================================
+ * ADDING A NEW PRODUCT TO KXBYTE SSO (e.g. kxwork)
+ * ============================================================
+ *
+ * 1. THIS FILE
+ *    - Add the id to VALID_CLIENTS:
+ *        const VALID_CLIENTS = [..., 'kxwork'];
+ *    - Add its redirect to ALLOWED_REDIRECTS:
+ *        kxwork: process.env.KXWORK_REDIRECT_URI || 'http://localhost:3000/kx/kxwork/oauth/callback',
+ *    - Add its display name in authorize() -> productNames:
+ *        kxwork: 'KXWork',
+ *
+ * 2. src/app.js
+ *    - Add the env var to CLIENT_ORIGINS (feeds the CSP form-action list):
+ *        process.env.KXWORK_REDIRECT_URI,
+ *    Without this, Chrome blocks the post-login redirect:
+ *    "violates the following Content Security Policy directive: form-action"
+ *
+ * 3. PRODUCTION ENV
+ *    KXWORK_REDIRECT_URI=https://kxwork.kxbyte.co.ke/kx/kxwork/oauth/callback
+ *    Must match the redirect_uri the product sends, exactly.
+ *
+ * 4. THE PRODUCT'S OWN APP
+ *    - Send users to:
+ *        {AUTH_BASE_URL}/api/v1/auth/oauth/authorize?client_id=kxwork&redirect_uri=<encoded callback>&state=<state>
+ *    - Handle the callback and POST the code to /api/v1/auth/oauth/token with client_id=kxwork.
+ *
+ * SYMPTOMS IF A STEP IS MISSED
+ *    "Invalid client_id"      -> step 1 (VALID_CLIENTS)
+ *    "Invalid redirect_uri"   -> step 1 or 3 (ALLOWED_REDIRECTS / env mismatch)
+ *    CSP form-action error    -> step 2 or 3 (CLIENT_ORIGINS / env not set)
+ * ============================================================
+ */
 import authDb from '../db/auth.db.js';
 import jwt from '../utils/jwt.js';
 import authService from '../services/auth.service.js';
