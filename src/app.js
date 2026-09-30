@@ -86,6 +86,18 @@ app.use((req, res, next) => {
 const AUTH_ORIGIN = process.env.AUTH_BASE_URL || 'http://localhost:5000';
 const FRONTEND_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:3000';
 
+// Origins the OAuth login redirects to (Chrome enforces form-action on post-submit redirects)
+const CLIENT_ORIGINS = [
+  process.env.KXTILL_REDIRECT_URI,
+  process.env.KXINVOICE_REDIRECT_URI,
+  process.env.KXCRM_REDIRECT_URI,
+  process.env.KXSUITE_REDIRECT_URI,
+]
+  .filter(Boolean)
+  .map((u) => new URL(u).origin);
+
+const FORM_ACTION_ORIGINS = [...new Set([AUTH_ORIGIN, FRONTEND_ORIGIN, ...CLIENT_ORIGINS])].join(' ');
+
 // ============================================================
 // CUSTOM CSP MIDDLEWARE (BEFORE HELMET)
 // ============================================================
@@ -105,7 +117,7 @@ app.use((req, res, next) => {
       [
         "default-src 'self'",
         "img-src 'self' data: https://res.cloudinary.com https://*.cloudinary.com",
-        `form-action 'self' ${AUTH_ORIGIN} ${FRONTEND_ORIGIN}`,
+        `form-action 'self' ${FORM_ACTION_ORIGINS}`,
         "script-src 'self' 'unsafe-inline'",
         "style-src 'self' 'unsafe-inline'",
         `connect-src 'self' ${AUTH_ORIGIN} ${FRONTEND_ORIGIN}`,
