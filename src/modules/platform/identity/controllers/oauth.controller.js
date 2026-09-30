@@ -14,7 +14,6 @@ const ALLOWED_REDIRECTS = {
   kxsuite: process.env.KXSUITE_REDIRECT_URI || 'http://localhost:3000/dashboard/oauth/callback',
 };
 
-
 const KXBYTE_LOGO_URL = 'https://res.cloudinary.com/dkahrnjrn/image/upload/v1788695499/logo.png';
 const AUTH_BASE_URL = process.env.AUTH_BASE_URL || 'http://localhost:5000';
 
@@ -22,22 +21,17 @@ const AUTH_BASE_URL = process.env.AUTH_BASE_URL || 'http://localhost:5000';
 // PAGE RENDERERS
 // ============================================================
 
-
-/**
- * GET /auth/forgot-password - Render forgot password page
- */
 const forgotPasswordPage = async (req, res) => {
   const { client_id, redirect_uri, state, error, success } = req.query;
-  
-  const errorMessage = error === 'rate_limited' 
-    ? 'Too many requests. Please try again later.' 
+
+  const errorMessage = error === 'rate_limited'
+    ? 'Too many requests. Please try again later.'
     : error || '';
 
-  const successMessage = success === 'email_sent' 
-    ? 'If your email is registered, you will receive a reset link.' 
+  const successMessage = success === 'email_sent'
+    ? 'If your email is registered, you will receive a reset link.'
     : '';
 
-  // Build the HTML with proper string concatenation to avoid template literal issues
   let html = '<!DOCTYPE html>\n';
   html += '<html>\n';
   html += '<head>\n';
@@ -135,7 +129,7 @@ const forgotPasswordPage = async (req, res) => {
   html += '<body>\n';
   html += '  <div class="card">\n';
   html += '    <div class="container">\n';
-  html += '      <a href="' + AUTH_BASE_URL + '/api/v1/auth/oauth/authorize?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '" class="back-link">\n';
+  html += '      <a href="/api/v1/auth/oauth/authorize?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '" class="back-link">\n';
   html += '        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\n';
   html += '          <path d="M19 12H5M12 19l-7-7 7-7"/>\n';
   html += '        </svg>\n';
@@ -166,12 +160,12 @@ const forgotPasswordPage = async (req, res) => {
     html += '        <strong>Check your email</strong>\n';
     html += '        ' + successMessage + '\n';
     html += '        <div class="resend-hint">\n';
-    html += '          Did not receive it? <a href="' + AUTH_BASE_URL + '/api/v1/auth/forgot-password?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '">Click here to try again</a>\n';
+    html += '          Did not receive it? <a href="/api/v1/auth/forgot-password?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '">Click here to try again</a>\n';
     html += '        </div>\n';
     html += '      </div>\n';
   }
 
-  html += '      <form action="' + AUTH_BASE_URL + '/api/v1/auth/forgot-password/html" method="POST" class="form"' + (successMessage ? ' style="display:none;"' : '') + '>\n';
+  html += '      <form action="/api/v1/auth/forgot-password/html" method="POST" class="form"' + (successMessage ? ' style="display:none;"' : '') + '>\n';
   html += '        <input type="hidden" name="client_id" value="' + client_id + '" />\n';
   html += '        <input type="hidden" name="redirect_uri" value="' + redirect_uri + '" />\n';
   if (state) html += '        <input type="hidden" name="state" value="' + state + '" />\n';
@@ -200,9 +194,6 @@ const forgotPasswordPage = async (req, res) => {
   res.send(html);
 };
 
-/**
- * POST /auth/forgot-password/html - Handle HTML forgot-password form submission
- */
 const forgotPasswordSubmit = async (req, res) => {
   const { email, client_id, redirect_uri, state } = req.body;
 
@@ -213,36 +204,25 @@ const forgotPasswordSubmit = async (req, res) => {
 
   if (!email) {
     baseParams.set('error', 'missing_email');
-    return res.redirect(
-      `${AUTH_BASE_URL}/api/v1/auth/forgot-password?${baseParams}`
-    );
+    return res.redirect(`/api/v1/auth/forgot-password?${baseParams}`);
   }
 
   try {
     await authService.forgotPassword(email, req);
     baseParams.set('success', 'email_sent');
-    return res.redirect(
-      `${AUTH_BASE_URL}/api/v1/auth/forgot-password?${baseParams}`
-    );
+    return res.redirect(`/api/v1/auth/forgot-password?${baseParams}`);
   } catch (err) {
     const code = /too many/i.test(err.message) ? 'rate_limited' : 'failed';
     baseParams.set('error', code);
-    return res.redirect(
-      `${AUTH_BASE_URL}/api/v1/auth/forgot-password?${baseParams}`
-    );
+    return res.redirect(`/api/v1/auth/forgot-password?${baseParams}`);
   }
 };
 
-/**
- * GET /auth/reset-password - Render reset password page (with token)
- */
 const resetPasswordPage = async (req, res) => {
   const { token, error } = req.query;
 
   if (!token) {
-    return res.redirect(
-      `${AUTH_BASE_URL}/api/v1/auth/forgot-password?error=invalid_token`
-    );
+    return res.redirect('/api/v1/auth/forgot-password?error=invalid_token');
   }
 
   const errorMessage =
@@ -355,7 +335,7 @@ const resetPasswordPage = async (req, res) => {
     html += '      </div>\n';
   }
 
-  html += '      <form action="' + AUTH_BASE_URL + '/api/v1/auth/reset-password/html" method="POST" class="form">\n';
+  html += '      <form action="/api/v1/auth/reset-password/html" method="POST" class="form">\n';
   html += '        <input type="hidden" name="token" value="' + token + '" />\n';
   html += '        <div class="form-group">\n';
   html += '          <label for="password">New Password</label>\n';
@@ -385,37 +365,20 @@ const resetPasswordPage = async (req, res) => {
   res.send(html);
 };
 
-/**
- * POST /auth/reset-password/html - Handle password reset form submission
- */
 const resetPasswordSubmit = async (req, res) => {
   const { token, password, confirmPassword } = req.body;
 
   const errorRedirect = (code) =>
-    res.redirect(
-      `${AUTH_BASE_URL}/api/v1/auth/reset-password?token=${encodeURIComponent(token || '')}&error=${code}`
-    );
+    res.redirect(`/api/v1/auth/reset-password?token=${encodeURIComponent(token || '')}&error=${code}`);
 
-  if (!token) {
-    return errorRedirect('invalid_token');
-  }
-
-  if (!password || !confirmPassword) {
-    return errorRedirect('missing_fields');
-  }
-
-  if (password.length < 8) {
-    return errorRedirect('weak_password');
-  }
-
-  if (password !== confirmPassword) {
-    return errorRedirect('password_mismatch');
-  }
+  if (!token) return errorRedirect('invalid_token');
+  if (!password || !confirmPassword) return errorRedirect('missing_fields');
+  if (password.length < 8) return errorRedirect('weak_password');
+  if (password !== confirmPassword) return errorRedirect('password_mismatch');
 
   try {
     await authService.resetPassword(token, password, req);
 
-    // Render success page — no redirect to a product-specific URL
     const successHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -477,7 +440,6 @@ const resetPasswordSubmit = async (req, res) => {
     <button class="close-btn" onclick="window.close()">Close</button>
   </div>
   <script>
-    // Auto-close after 3s if opened as popup
     if (window.opener) {
       setTimeout(function() {
         if (window.opener && !window.opener.closed) {
@@ -497,14 +459,11 @@ const resetPasswordSubmit = async (req, res) => {
   }
 };
 
-/**
- * GET /auth/register - Render registration page
- */
 const registerPage = async (req, res) => {
   const { client_id, redirect_uri, state, error } = req.query;
-  
+
   const errorMessage = error === 'email_exists'
-    ? 'This email is already registered. <a href="' + AUTH_BASE_URL + '/api/v1/auth/oauth/authorize?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '" style="color:#d9a84e;text-decoration:none;">Sign in</a> instead.'
+    ? 'This email is already registered. <a href="/api/v1/auth/oauth/authorize?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '" style="color:#d9a84e;text-decoration:none;">Sign in</a> instead.'
     : error === 'registration_failed'
       ? 'Something went wrong. Please try again or contact support if the issue persists.'
       : '';
@@ -605,7 +564,7 @@ const registerPage = async (req, res) => {
   html += '<body>\n';
   html += '  <div class="card">\n';
   html += '    <div class="container">\n';
-  html += '      <a href="' + AUTH_BASE_URL + '/api/v1/auth/oauth/authorize?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '" class="back-link">\n';
+  html += '      <a href="/api/v1/auth/oauth/authorize?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '" class="back-link">\n';
   html += '        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">\n';
   html += '          <path d="M19 12H5M12 19l-7-7 7-7"/>\n';
   html += '        </svg>\n';
@@ -624,7 +583,7 @@ const registerPage = async (req, res) => {
     html += '      <div class="error">' + errorMessage + '</div>\n';
   }
 
-  html += '      <form action="' + AUTH_BASE_URL + '/api/v1/auth/register" method="POST" class="form">\n';
+  html += '      <form action="/api/v1/auth/register" method="POST" class="form">\n';
   html += '        <input type="hidden" name="client_id" value="' + client_id + '" />\n';
   html += '        <input type="hidden" name="redirect_uri" value="' + redirect_uri + '" />\n';
   if (state) html += '        <input type="hidden" name="state" value="' + state + '" />\n';
@@ -649,7 +608,7 @@ const registerPage = async (req, res) => {
   html += '        </div>\n';
   html += '        <button type="submit" class="submit-btn">Create Account</button>\n';
   html += '      </form>\n';
-  html += '      <p class="login-link">Already have an account? <a href="' + AUTH_BASE_URL + '/api/v1/auth/oauth/authorize?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '">Sign in</a></p>\n';
+  html += '      <p class="login-link">Already have an account? <a href="/api/v1/auth/oauth/authorize?client_id=' + client_id + '&redirect_uri=' + encodeURIComponent(redirect_uri) + (state ? '&state=' + state : '') + '">Sign in</a></p>\n';
   html += '    </div>\n';
   html += '  </div>\n';
   html += '  <script>\n';
@@ -667,14 +626,10 @@ const registerPage = async (req, res) => {
   res.send(html);
 };
 
-
 // ============================================================
 // OAUTH FLOW
 // ============================================================
 
-/**
- * GET /oauth/authorize - Render OAuth login page
- */
 const authorize = async (req, res) => {
   const { client_id, redirect_uri, state } = req.query;
 
@@ -706,14 +661,14 @@ const authorize = async (req, res) => {
   };
   const productName = productNames[client_id] || client_id;
 
-  const errorMessage = req.query.error === 'invalid_credentials' 
-    ? 'Invalid email or password' 
+  const errorMessage = req.query.error === 'invalid_credentials'
+    ? 'Invalid email or password'
     : req.query.error === 'registered'
-    ? 'Account created! Please sign in.'
-    : req.query.error || '';
+      ? 'Account created! Please sign in.'
+      : req.query.error || '';
 
-  const successMessage = req.query.registered === 'true' 
-    ? 'Account created successfully! Please sign in.' 
+  const successMessage = req.query.registered === 'true'
+    ? 'Account created successfully! Please sign in.'
     : '';
 
   const loginPage = `
@@ -935,7 +890,7 @@ const authorize = async (req, res) => {
               </div>
             ` : ''}
 
-            <form action="${AUTH_BASE_URL}/api/v1/auth/oauth/login" method="POST" class="form">
+            <form action="/api/v1/auth/oauth/login" method="POST" class="form">
               <input type="hidden" name="client_id" value="${client_id}" />
               <input type="hidden" name="redirect_uri" value="${redirect_uri}" />
               ${state ? `<input type="hidden" name="state" value="${state}" />` : ''}
@@ -957,10 +912,10 @@ const authorize = async (req, res) => {
             </form>
 
             <div class="links">
-              <a href="${AUTH_BASE_URL}/api/v1/auth/forgot-password?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}">
+              <a href="/api/v1/auth/forgot-password?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}">
                 Forgot password?
               </a>
-              <a href="${AUTH_BASE_URL}/api/v1/auth/register?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}" class="register">
+              <a href="/api/v1/auth/register?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}" class="register">
                 Create account
               </a>
             </div>
@@ -983,13 +938,6 @@ const authorize = async (req, res) => {
   res.send(loginPage);
 };
 
-// ============================================================
-// OAUTH API ENDPOINTS
-// ============================================================
-
-/**
- * POST /oauth/login - Handle OAuth login form submission
- */
 const oauthLogin = async (req, res) => {
   const { email, password, client_id, redirect_uri, state } = req.body;
 
@@ -1007,13 +955,10 @@ const oauthLogin = async (req, res) => {
 
     res.redirect(`${redirect_uri}?code=${code}${state ? `&state=${state}` : ''}`);
   } catch (error) {
-    res.redirect(`${AUTH_BASE_URL}/api/v1/auth/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=invalid_credentials`);
+    res.redirect(`/api/v1/auth/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=invalid_credentials`);
   }
 };
 
-/**
- * POST /oauth/token - Exchange authorization code for tokens
- */
 const token = async (req, res) => {
   const { code, client_id } = req.body;
 
@@ -1075,9 +1020,6 @@ const token = async (req, res) => {
   });
 };
 
-/**
- * POST /oauth/revoke - Revoke refresh token
- */
 const revoke = async (req, res) => {
   const { refresh_token } = req.body;
 
@@ -1094,14 +1036,11 @@ const revoke = async (req, res) => {
 };
 
 export default {
-  // Page renderers
   forgotPasswordPage,
   forgotPasswordSubmit,
   resetPasswordPage,
   resetPasswordSubmit,
   registerPage,
-
-  // OAuth flow
   authorize,
   oauthLogin,
   token,
