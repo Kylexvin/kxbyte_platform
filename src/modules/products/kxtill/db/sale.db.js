@@ -2,12 +2,16 @@
 
 import prisma from '../../../../database/postgres/prisma.js';
 
+// Every write helper accepts an optional Prisma client as its last argument
+// (`tx`). Pass the client from `prisma.$transaction(async (tx) => ...)` to make
+// the call part of that transaction. Without it, the global client is used.
+
 // ============================================================
 // SALES
 // ============================================================
 
-const createSale = async (data) => {
-  return prisma.kxTillSale.create({ data });
+const createSale = async (data, tx = prisma) => {
+  return tx.kxTillSale.create({ data });
 };
 
 const findSaleByClientId = async (clientSaleId) => {
@@ -42,8 +46,8 @@ const findSaleByClientId = async (clientSaleId) => {
   });
 };
 
-const findSaleById = async (id, organizationId) => {
-  return prisma.kxTillSale.findFirst({
+const findSaleById = async (id, organizationId, tx = prisma) => {
+  return tx.kxTillSale.findFirst({
     where: { id, organizationId },
     include: {
       items: {
@@ -70,23 +74,23 @@ const findSaleById = async (id, organizationId) => {
         },
       },
       branch: true,
-      customer: true, // ✅ Add this
+      customer: true,
     },
   });
 };
 
 const findSalesByOrganization = async (organizationId, filters = {}) => {
-  const { 
-    limit = 50, 
-    offset = 0, 
-    startDate, 
-    endDate, 
+  const {
+    limit = 50,
+    offset = 0,
+    startDate,
+    endDate,
     status,
     branchId,
     search,
   } = filters;
-  
-  const where = { 
+
+  const where = {
     organizationId,
   };
 
@@ -103,7 +107,7 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
   if (status) {
     where.status = status;
   }
-  
+
   if (search) {
     where.OR = [
       { reference: { contains: search, mode: 'insensitive' } },
@@ -197,8 +201,8 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
     totalAmount: sale.totalAmount,
     status: sale.status,
     paymentStatus: sale.paymentStatus,
-    paymentMethod: sale.payments && sale.payments.length > 0 
-      ? sale.payments[0].method 
+    paymentMethod: sale.payments && sale.payments.length > 0
+      ? sale.payments[0].method
       : null,
     itemsCount: sale.items?.length || 0,
     items: sale.items,
@@ -218,21 +222,21 @@ const findSalesByOrganization = async (organizationId, filters = {}) => {
     uniqueCustomers: customerGroups.length,
   };
 
-  return { 
-    items: mappedItems, 
-    total, 
-    limit, 
+  return {
+    items: mappedItems,
+    total,
+    limit,
     offset,
     totals,
   };
 };
 
-const updateSaleStatus = async (id, status, userId = null) => {
-  const data = { 
+const updateSaleStatus = async (id, status, userId = null, tx = prisma) => {
+  const data = {
     status,
     updatedAt: new Date(),
   };
-  
+
   if (userId) {
     // use refundedBy (exists in schema) instead of updatedBy (doesn't exist)
     if (status === 'REFUNDED') {
@@ -240,10 +244,20 @@ const updateSaleStatus = async (id, status, userId = null) => {
       data.refundedAt = new Date();
     }
   }
-  
-  return prisma.kxTillSale.update({
+
+  return tx.kxTillSale.update({
     where: { id },
     data,
+  });
+};
+
+// NOTE: the service called this function but it did not exist in the previous
+// db file, so refunds with shifts enabled would have thrown. The column name
+// `refundShiftId` is an assumption: check it against your Prisma schema.
+const updateSaleRefundShift = async (id, refundShiftId, tx = prisma) => {
+  return tx.kxTillSale.update({
+    where: { id },
+    data: { refundShiftId },
   });
 };
 
@@ -251,20 +265,20 @@ const updateSaleStatus = async (id, status, userId = null) => {
 // SALE ITEMS
 // ============================================================
 
-const createSaleItem = async (data) => {
-  return prisma.kxTillSaleItem.create({ data });
+const createSaleItem = async (data, tx = prisma) => {
+  return tx.kxTillSaleItem.create({ data });
 };
 
-const createManySaleItems = async (items) => {
-  return prisma.kxTillSaleItem.createMany({ data: items });
+const createManySaleItems = async (items, tx = prisma) => {
+  return tx.kxTillSaleItem.createMany({ data: items });
 };
 
 // ============================================================
 // SALE PAYMENTS
 // ============================================================
 
-const createSalePayment = async (data) => {
-  return prisma.kxTillSalePayment.create({ data });
+const createSalePayment = async (data, tx = prisma) => {
+  return tx.kxTillSalePayment.create({ data });
 };
 
 export default {
@@ -272,6 +286,7 @@ export default {
   findSaleById,
   findSalesByOrganization,
   updateSaleStatus,
+  updateSaleRefundShift,
   createSaleItem,
   createManySaleItems,
   createSalePayment,

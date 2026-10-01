@@ -31,6 +31,16 @@ const createSale = async (req, res) => {
     if (error.message === 'You do not have permission to create sales') {
       return res.status(403).json({ error: error.message });
     }
+    if (
+      error.message === 'Shift is required' ||
+      error.message === 'Shift not found' ||
+      error.message === 'Shift does not match branch'
+    ) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.message === 'Shift does not belong to you') {
+      return res.status(403).json({ error: error.message });
+    }
     console.error('Create sale error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -63,6 +73,16 @@ const createOfflineSale = async (req, res) => {
     if (error.message.includes('Insufficient stock')) {
       return res.status(400).json({ error: error.message });
     }
+    if (
+      error.message === 'Shift is required' ||
+      error.message === 'Shift not found' ||
+      error.message === 'Shift does not match branch'
+    ) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.message === 'Shift does not belong to you') {
+      return res.status(403).json({ error: error.message });
+    }
     console.error('Create offline sale error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -76,7 +96,7 @@ const getSales = async (req, res) => {
     }
 
     const { organizationId } = req.params;
-    const { limit, offset, startDate, endDate, status, branchId, search } = req.query; // ← Add branchId, search
+    const { limit, offset, startDate, endDate, status, branchId, search } = req.query;
     
     const sales = await saleService.getSales(organizationId, userId, {
       limit: limit ? parseInt(limit) : 50,
@@ -84,8 +104,8 @@ const getSales = async (req, res) => {
       startDate,
       endDate,
       status,
-      branchId,  // ← Pass branchId
-      search,    // ← Pass search
+      branchId,
+      search,
     });
     res.status(200).json(sales);
   } catch (error) {
@@ -127,7 +147,8 @@ const refundSale = async (req, res) => {
     }
 
     const { organizationId, saleId } = req.params;
-    const sale = await saleService.refundSale(organizationId, userId, saleId);
+    const { shiftId } = req.body || {};
+    const sale = await saleService.refundSale(organizationId, userId, saleId, null, shiftId);
     res.status(200).json({ message: 'Sale refunded successfully', sale });
   } catch (error) {
     if (error.message === 'You do not have access to this organization') {
@@ -140,6 +161,16 @@ const refundSale = async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
     if (error.message === 'You do not have permission to refund sales') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (
+      error.message === 'Shift is required' ||
+      error.message === 'Shift not found' ||
+      error.message === 'Shift does not match branch'
+    ) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.message === 'Shift does not belong to you') {
       return res.status(403).json({ error: error.message });
     }
     console.error('Refund sale error:', error);

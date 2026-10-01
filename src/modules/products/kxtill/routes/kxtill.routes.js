@@ -13,6 +13,9 @@ import customerController from '../controllers/customer.controller.js';
 import branchController from '../controllers/branch.controller.js';
 import dashboardSyncController from '../controllers/dashboardSync.controller.js';
 import billingController from '../controllers/billing.controller.js';
+import shiftController from '../shift/controllers/shift.controller.js';
+import shiftSettingController from '../shift/controllers/setting.controller.js';
+import shiftValidator from '../shift/validators/shift.validator.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 import subscriptionMiddleware from '../../../platform/subscriptions/middleware/subscription.middleware.js';
 
@@ -62,7 +65,7 @@ router.get('/sales/:saleId', guard, saleController.getSale);
 router.post('/sales/:saleId/refund', guard, saleController.refundSale);
 router.get('/sales/:saleId/receipt', guard, receiptController.generateReceipt);
 
-
+// ============================================================
 // SYNC ROUTES
 // ============================================================
 router.get('/sync/products', guard, productController.getProductsForSync);
@@ -80,6 +83,36 @@ router.get('/transfers/:transferId', guard, transferController.getTransfer);
 router.patch('/transfers/:transferId/approve', guard, transferController.approveTransfer);
 router.patch('/transfers/:transferId/complete', guard, transferController.completeTransfer);
 router.patch('/transfers/:transferId/reject', guard, transferController.rejectTransfer);
+
+// ============================================================
+// BRANCH SHIFT SETTINGS
+// ============================================================
+router.get('/branches/:branchId/settings', guard, shiftSettingController.getSetting);
+router.patch('/branches/:branchId/settings', guard, shiftSettingController.updateSetting);
+
+// ============================================================
+// SHIFT LIFECYCLE
+// ============================================================
+router.get('/shifts/current', guard, shiftController.getCurrentShift);
+router.get('/shifts/pending-review', guard, shiftController.getPendingReview);
+router.get('/shifts', guard, shiftController.getShifts);
+router.post('/shifts/open', guard, shiftValidator.validateOpenShift, shiftController.openShift);
+router.post('/shifts/:shiftId/close', guard, shiftValidator.validateCloseShift, shiftController.closeShift);
+router.post('/shifts/:shiftId/cancel', guard, shiftValidator.validateCancelShift, shiftController.cancelShift);
+router.post('/shifts/:shiftId/force-close', guard, shiftValidator.validateForceClose, shiftController.forceCloseShift);
+router.get('/shifts/:shiftId', guard, shiftController.getShift);
+
+// ============================================================
+// SHIFT HANDOVER
+// ============================================================
+router.post('/shifts/:shiftId/handover/request', guard, shiftValidator.validateHandoverRequest, shiftController.requestHandover);
+router.post('/shifts/:shiftId/handover/resolve', guard, shiftValidator.validateHandoverResolve, shiftController.resolveHandover);
+router.post('/shifts/:shiftId/handover/reject', guard, shiftValidator.validateHandoverReject, shiftController.rejectHandover);
+
+// ============================================================
+// VARIANCE REVIEW
+// ============================================================
+router.post('/shifts/:shiftId/review', guard, shiftValidator.validateReviewVariance, shiftController.reviewVariance);
 
 // ============================================================
 // STAFF ROUTES
@@ -146,4 +179,4 @@ router.get('/customers/:customerId/sales', guard, customerController.getCustomer
 router.get('/billing', billingController.get);
 router.get('/billing/payments', billingController.payments);
 
-export default router; 
+export default router;

@@ -2,6 +2,8 @@
 
 import saleDb from '../db/sale.db.js';
 import productDb from '../db/product.db.js';
+import settingDb from '../shift/db/setting.db.js';
+import shiftDb from '../shift/db/shift.db.js';
 import orgDb from '../../../platform/organizations/db/org.db.js';
 import branchDb from '../../../platform/branches/db/branch.db.js';
 import audit from '../../../platform/audit/index.js';
@@ -22,6 +24,35 @@ const generateReference = () => {
   return `INV-${timestamp}-${random}`;
 };
 
+const resolveShiftForSale = async ({ organizationId, userId, branchId, shiftId }) => {
+  const branchSetting = await settingDb.findSettingByBranch(branchId);
+
+  if (!branchSetting?.shiftsEnabled) {
+    return null;
+  }
+
+  if (!shiftId) {
+    throw new Error('Shift is required');
+  }
+
+  const shift = await shiftDb.findShiftById(shiftId, organizationId);
+  if (!shift) {
+    throw new Error('Shift not found');
+  }
+  if (shift.userId !== userId) {
+    throw new Error('Shift does not belong to you');
+  }
+  if (shift.branchId !== branchId) {
+    throw new Error('Shift does not match branch');
+  }
+
+  return shift.id;
+};
+
+// ============================================================
+// CREATE SALE (online)
+// ============================================================
+
 const createSale = async (userId, organizationId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -38,17 +69,24 @@ const createSale = async (userId, organizationId, data) => {
     throw new Error('You do not have permission to create sales');
   }
 
-  // ✅ Validate customer if provided
+  const shiftId = await resolveShiftForSale({
+    organizationId,
+    userId,
+    branchId: data.branchId,
+    shiftId: data.shiftId,
+  });
+
+  // Validate customer if provided
   let customer = null;
   if (data.customerId) {
     const customerService = await import('../../../platform/customers/index.js');
     customer = await customerService.default.validateCustomer(data.customerId, organizationId);
   }
 
+  // ---- Pre-validate + compute everything BEFORE touching the database ----
   let subtotal = 0;
   let taxAmount = 0;
-  const saleItems = [];
-  let currentBranchProduct = null;
+  const preparedItems = [];
 
   for (const item of data.items) {
     const product = await productDb.findProductById(item.productId, organizationId);
@@ -77,8 +115,14 @@ const createSale = async (userId, organizationId, data) => {
       throw new Error(`Product ${product.name} is not available at this branch`);
     }
 
-    if (branchProduct.stock < baseQuantity) {
-      throw new Error(`Insufficient stock for ${product.name}. Available: ${branchProduct.stock} ${product.baseUnit?.abbreviation || 'units'}`);
+    const trackInventory = !!product.trackInventory;
+
+    // Friendly early error. The atomic check inside the transaction below is
+    // the one that actually protects against overselling.
+    if (trackInventory && Number(branchProduct.stock) < baseQuantity) {
+      throw new Error(
+        `Insufficient stock for ${product.name}. Available: ${branchProduct.stock} ${product.baseUnit?.abbreviation || 'units'}`
+      );
     }
 
     const total = quantity * unitPrice;
@@ -87,65 +131,100 @@ const createSale = async (userId, organizationId, data) => {
     subtotal += total;
     taxAmount += tax;
 
-    saleItems.push({
-      productId: product.id,
-      unitId: unit.id,
-      unitName: unit.name,
-      unitAbbrev: unit.abbreviation,
-      unitType: unit.unitType,
-      quantity: quantity,
-      conversionQty: conversionQty,
-      unitPrice: unitPrice,
-      baseQuantity: baseQuantity,
-      taxRate: Number(product.taxRate),
-      taxAmount: tax,
-      discount: 0,
-      total: total + tax,
+    preparedItems.push({
+      product,
+      branchProduct,
+      unit,
+      quantity,
+      conversionQty,
+      baseQuantity,
+      unitPrice,
+      tax,
+      total,
+      trackInventory,
     });
-
-    await prisma.kxTillBranchProduct.update({
-      where: { id: branchProduct.id },
-      data: { stock: { decrement: baseQuantity } },
-    });
-
-    currentBranchProduct = branchProduct;
   }
 
   const totalAmount = subtotal + taxAmount;
-
   const reference = generateReference();
 
-  const sale = await saleDb.createSale({
-    organizationId,
-    userId,
-    reference,
-    customerId: customer?.id || null,
-    customerName: customer?.name || data.customerName || 'Walk-in',
-    branchId: data.branchId,
-    subtotal,
-    taxAmount,
-    discount: 0,
-    totalAmount,
-    status: 'COMPLETED',
-    paymentStatus: 'PAID',
-  });
+  // ---- Single transaction: sale + items + stock + payment ----
+  // If anything fails, everything rolls back (no orphan stock decrements).
+  const sale = await prisma.$transaction(
+    async (tx) => {
+      const createdSale = await saleDb.createSale(
+        {
+          organizationId,
+          userId,
+          reference,
+          customerId: customer?.id || null,
+          customerName: customer?.name || data.customerName || 'Walk-in',
+          branchId: data.branchId,
+          shiftId,
+          subtotal,
+          taxAmount,
+          discount: 0,
+          totalAmount,
+          status: 'COMPLETED',
+          paymentStatus: 'PAID',
+        },
+        tx
+      );
 
-  for (const item of saleItems) {
-    await saleDb.createSaleItem({
-      ...item,
-      saleId: sale.id,
-      branchProductId: currentBranchProduct?.id,
-    });
-  }
+      for (const p of preparedItems) {
+        if (p.trackInventory) {
+          // Atomic guard: only decrement if enough stock remains right now.
+          const result = await tx.kxTillBranchProduct.updateMany({
+            where: {
+              id: p.branchProduct.id,
+              stock: { gte: p.baseQuantity },
+            },
+            data: { stock: { decrement: p.baseQuantity } },
+          });
 
-  if (data.paymentMethod) {
-    await saleDb.createSalePayment({
-      saleId: sale.id,
-      method: data.paymentMethod,
-      amount: totalAmount,
-      reference: data.paymentReference || null,
-    });
-  }
+          if (result.count === 0) {
+            throw new Error(`Insufficient stock for ${p.product.name}`);
+          }
+        }
+
+        await saleDb.createSaleItem(
+          {
+            saleId: createdSale.id,
+            productId: p.product.id,
+            unitId: p.unit.id,
+            branchProductId: p.branchProduct.id,
+            unitName: p.unit.name,
+            unitAbbrev: p.unit.abbreviation,
+            unitType: p.unit.unitType,
+            quantity: p.quantity,
+            conversionQty: p.conversionQty,
+            unitPrice: p.unitPrice,
+            baseQuantity: p.baseQuantity,
+            taxRate: Number(p.product.taxRate),
+            taxAmount: p.tax,
+            discount: 0,
+            total: p.total + p.tax,
+          },
+          tx
+        );
+      }
+
+      if (data.paymentMethod) {
+        await saleDb.createSalePayment(
+          {
+            saleId: createdSale.id,
+            method: data.paymentMethod,
+            amount: totalAmount,
+            reference: data.paymentReference || null,
+          },
+          tx
+        );
+      }
+
+      return createdSale;
+    },
+    { maxWait: 5000, timeout: 15000 }
+  );
 
   await audit.log({
     organizationId,
@@ -155,16 +234,20 @@ const createSale = async (userId, organizationId, data) => {
     resourceId: sale.id,
     metadata: {
       total: totalAmount,
-      items: saleItems.length,
+      items: preparedItems.length,
       reference,
       customerId: customer?.id || null,
       customerName: customer?.name || 'Walk-in',
+      shiftId,
     },
   });
 
   return saleDb.findSaleById(sale.id, organizationId);
 };
 
+// ============================================================
+// CREATE SALE (offline sync): unchanged
+// ============================================================
 
 const createOfflineSale = async (userId, organizationId, data) => {
   const {
@@ -196,6 +279,13 @@ const createOfflineSale = async (userId, organizationId, data) => {
 
   const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.create');
   if (!hasPermission) throw new Error('You do not have permission to create sales');
+
+  const shiftId = await resolveShiftForSale({
+    organizationId,
+    userId,
+    branchId,
+    shiftId: data.shiftId,
+  });
 
   let customer = null;
   if (customerId) {
@@ -269,6 +359,7 @@ const createOfflineSale = async (userId, organizationId, data) => {
       organizationId,
       userId,
       branchId,
+      shiftId,
       clientSaleId: clientSaleId || null,
       customerId: customer?.id || null,
       customerName: customer?.name || customerName || null,
@@ -293,7 +384,7 @@ const createOfflineSale = async (userId, organizationId, data) => {
 
   // ---- Decrement stock + persist items ----
   // Only after the sale row is safely created. If anything below fails,
-  // the sale exists and stock has moved — no orphan decrements.
+  // the sale exists and stock has moved: no orphan decrements.
   for (const p of preparedItems) {
     if (p.trackInventory) {
       await productDb.updateStock(p.branchProduct.id, -p.baseQuantity);
@@ -340,11 +431,16 @@ const createOfflineSale = async (userId, organizationId, data) => {
       items: preparedItems.length,
       customerId: customer?.id || null,
       customerName: customer?.name || customerName || null,
+      shiftId,
     },
   });
 
   return saleDb.findSaleById(sale.id, organizationId);
 };
+
+// ============================================================
+// READ
+// ============================================================
 
 const getSales = async (organizationId, userId, filters) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -369,7 +465,11 @@ const getSale = async (organizationId, userId, saleId) => {
   return sale;
 };
 
-const refundSale = async (organizationId, userId, saleId, branchId = null) => {
+// ============================================================
+// REFUND
+// ============================================================
+
+const refundSale = async (organizationId, userId, saleId, branchId = null, shiftId = null) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
     throw new Error('You do not have access to this organization');
@@ -385,7 +485,14 @@ const refundSale = async (organizationId, userId, saleId, branchId = null) => {
     throw new Error('Sale not found');
   }
 
-  // ✅ Check branch isolation
+  const refundShiftId = await resolveShiftForSale({
+    organizationId,
+    userId,
+    branchId: sale.branchId,
+    shiftId,
+  });
+
+  // Check branch isolation
   if (branchId && sale.branchId !== branchId) {
     throw new Error('You can only refund sales from your assigned branch');
   }
@@ -406,19 +513,26 @@ const refundSale = async (organizationId, userId, saleId, branchId = null) => {
     throw new Error('Sale is voided and cannot be refunded');
   }
 
-  // Restore stock for each item
-  for (const item of sale.items) {
-    await prisma.kxTillBranchProduct.update({
-      where: { id: item.branchProductId },
-      data: {
-        stock: {
-          increment: item.baseQuantity,
-        },
-      },
-    });
-  }
+  // Restore stock + mark refunded in one transaction
+  const updated = await prisma.$transaction(async (tx) => {
+    for (const item of sale.items) {
+      // Untracked products never had stock decremented, so don't restore it.
+      if (item.product && item.product.trackInventory === false) continue;
 
-  const updated = await saleDb.updateSaleStatus(saleId, 'REFUNDED', userId);
+      await tx.kxTillBranchProduct.update({
+        where: { id: item.branchProductId },
+        data: { stock: { increment: item.baseQuantity } },
+      });
+    }
+
+    await saleDb.updateSaleStatus(saleId, 'REFUNDED', userId, tx);
+
+    if (refundShiftId) {
+      await saleDb.updateSaleRefundShift(saleId, refundShiftId, tx);
+    }
+
+    return saleDb.findSaleById(saleId, organizationId, tx);
+  });
 
   await audit.log({
     organizationId,
@@ -430,6 +544,7 @@ const refundSale = async (organizationId, userId, saleId, branchId = null) => {
       originalTotal: sale.totalAmount,
       refundedBy: userId,
       branchId: sale.branchId,
+      refundShiftId,
     },
   });
 
@@ -441,5 +556,5 @@ export default {
   getSales,
   getSale,
   refundSale,
-  createOfflineSale
+  createOfflineSale,
 };

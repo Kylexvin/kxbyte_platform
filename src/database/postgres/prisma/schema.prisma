@@ -39,6 +39,13 @@ model User {
   rejectedTransfers  KxTillTransfer[] @relation("RejectedBy")
   completedTransfers KxTillTransfer[] @relation("CompletedBy")
   refundedSales     KxTillSale[] @relation("RefundedByUser")
+
+  shiftsOwned         KxTillShift[] @relation("ShiftOwner")
+  shiftsOpened        KxTillShift[] @relation("ShiftOpenedBy")
+  shiftsClosed        KxTillShift[] @relation("ShiftClosedBy")
+  shiftsHandoverReq   KxTillShift[] @relation("ShiftHandoverRequestedBy")
+  shiftsHandoverRes   KxTillShift[] @relation("ShiftHandoverResolvedBy")
+  shiftsVarianceRev   KxTillShift[] @relation("ShiftVarianceReviewedBy")
   
   supportTickets          SupportTicket[] @relation("TicketReporter")
   assignedSupportTickets  SupportTicket[] @relation("TicketAssignee")
@@ -111,6 +118,7 @@ model Organization {
   paymentIPNRegistrations PaymentIPNRegistration[]
   kxtillProducts    KxTillProduct[]
   kxtillSales       KxTillSale[]
+  kxtillShifts KxTillShift[]
   kxtillStoreSetting KxTillStoreSetting?
   branches       Branch[]
   supportTickets SupportTicket[]
@@ -730,6 +738,11 @@ model KxTillSale {
   refundedByUser User?    @relation("RefundedByUser", fields: [refundedBy], references: [id], onDelete: SetNull)
   refundedAt     DateTime?
 
+  shiftId        String?
+  shift          KxTillShift? @relation("ShiftSales", fields: [shiftId], references: [id], onDelete: SetNull)
+  refundShiftId  String?
+  refundShift    KxTillShift? @relation("RefundShift", fields: [refundShiftId], references: [id], onDelete: SetNull)
+
   subtotal       Decimal
   taxAmount      Decimal  @default(0)
   discount       Decimal  @default(0)
@@ -755,6 +768,8 @@ model KxTillSale {
   @@index([reference])
   @@index([clientSaleId])
   @@map("kxtill_sales")
+  @@index([shiftId])
+  @@index([refundShiftId])
 }
 
 // ============================================================
@@ -897,6 +912,9 @@ model Branch {
   assignments    BranchAssignment[]
   sales          KxTillSale[]
   branchProducts KxTillBranchProduct[]
+
+  kxtillBranchSetting KxTillBranchSetting?
+  kxtillShifts        KxTillShift[]
 
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -1102,4 +1120,79 @@ model Customer {
   @@index([email])
   @@unique([organizationId, phone])
   @@map("customers")
+}
+
+// ============================================================
+// KXTILL - SHIFT SETTINGS (per branch)
+// ============================================================
+
+model KxTillBranchSetting {
+  id                String   @id @default(uuid())
+  branchId          String   @unique
+  branch            Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  shiftsEnabled     Boolean  @default(false)
+  varianceThreshold Decimal  @default(50)
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("kxtill_branch_settings")
+}
+
+// ============================================================
+// KXTILL - SHIFTS
+// ============================================================
+
+model KxTillShift {
+  id                    String   @id @default(uuid())
+  organizationId        String
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branchId              String
+  branch                Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User     @relation("ShiftOwner", fields: [userId], references: [id], onDelete: Restrict)
+
+  tillId                String?
+  status                String   @default("OPEN")
+  closureType           String?
+
+  openingFloat          Decimal
+  declaredCash          Decimal?
+  expectedCash          Decimal?
+  variance              Decimal?
+
+  openedAt              DateTime @default(now())
+  closedAt              DateTime?
+
+  openedById            String
+  openedBy              User     @relation("ShiftOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  closedById            String?
+  closedBy              User?    @relation("ShiftClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+
+  handoverRequestedById String?
+  handoverRequestedBy   User?    @relation("ShiftHandoverRequestedBy", fields: [handoverRequestedById], references: [id], onDelete: SetNull)
+  handoverResolvedById  String?
+  handoverResolvedBy    User?    @relation("ShiftHandoverResolvedBy", fields: [handoverResolvedById], references: [id], onDelete: SetNull)
+  handoverResolvedAt    DateTime?
+  handoverNote          String?
+
+  varianceReviewedById  String?
+  varianceReviewedBy    User?    @relation("ShiftVarianceReviewedBy", fields: [varianceReviewedById], references: [id], onDelete: SetNull)
+  varianceReviewedAt    DateTime?
+  varianceNote          String?
+
+  sales                 KxTillSale[] @relation("ShiftSales")
+  refunds               KxTillSale[] @relation("RefundShift")
+
+  deletedAt             DateTime?
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([status])
+  @@index([branchId, status])
+  @@map("kxtill_shifts")
 }

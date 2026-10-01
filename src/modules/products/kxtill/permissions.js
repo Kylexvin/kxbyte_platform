@@ -82,6 +82,31 @@ const permissions = [
     description: 'Export KxTill reports',
   },
 
+
+  // ============================================================
+  // SHIFTS
+  // ============================================================
+  {
+    key: 'kxtill.shift.force_close',
+    name: 'Force Close Shift',
+    description: 'Force close any shift',
+  },
+  {
+    key: 'kxtill.shift.resolve_handover',
+    name: 'Resolve Handover',
+    description: 'Resolve shift handover requests',
+  },
+  {
+    key: 'kxtill.shift.resolve_variance',
+    name: 'Resolve Variance',
+    description: 'Review and resolve shift variance',
+  },
+  {
+    key: 'kxtill.shift.settings',
+    name: 'Shift Settings',
+    description: 'Enable/disable shifts per branch',
+  },
+
   // ============================================================
   // SETTINGS
   // ============================================================
