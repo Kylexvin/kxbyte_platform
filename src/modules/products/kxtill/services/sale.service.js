@@ -49,6 +49,62 @@ const resolveShiftForSale = async ({ organizationId, userId, branchId, shiftId }
   return shift.id;
 };
 
+// Normalizes `data.payments` (array) or `data.paymentMethod` (legacy single)
+// into a canonical array of { method, amount, reference }.
+const normalizePayments = (data, totalAmount) => {
+  if (Array.isArray(data.payments) && data.payments.length > 0) {
+    return data.payments.map((p, i) => {
+      if (!p || typeof p.method !== 'string' || !p.method.trim()) {
+        throw new Error(`Payment ${i + 1}: method is required`);
+      }
+      const amount = Number(p.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error(`Payment ${i + 1}: amount must be a positive number`);
+      }
+      return {
+        method: p.method.trim(),
+        amount,
+        reference: p.reference || null,
+      };
+    });
+  }
+
+  if (data.paymentMethod) {
+    return [
+      {
+        method: data.paymentMethod,
+        amount: totalAmount,
+        reference: data.paymentReference || null,
+      },
+    ];
+  }
+
+  return [];
+};
+
+// Validates that payments fully cover the total.
+// PARTIAL status is reserved for the credit ledger module — not yet live.
+const resolvePaymentStatus = (payments, totalAmount) => {
+  if (payments.length === 0) {
+    return { paymentStatus: 'PAID', balance: 0 };
+  }
+
+  const paidTotal = payments.reduce((sum, p) => sum + p.amount, 0);
+  const tolerance = 0.01;
+
+  if (paidTotal > totalAmount + tolerance) {
+    const over = (paidTotal - totalAmount).toFixed(2);
+    throw new Error(`Payments exceed sale total by ${over}`);
+  }
+
+  if (paidTotal < totalAmount - tolerance) {
+    const short = (totalAmount - paidTotal).toFixed(2);
+    throw new Error(`Payments are short by ${short}. Full payment required.`);
+  }
+
+  return { paymentStatus: 'PAID', balance: 0 };
+};
+
 // ============================================================
 // CREATE SALE (online)
 // ============================================================
@@ -117,8 +173,6 @@ const createSale = async (userId, organizationId, data) => {
 
     const trackInventory = !!product.trackInventory;
 
-    // Friendly early error. The atomic check inside the transaction below is
-    // the one that actually protects against overselling.
     if (trackInventory && Number(branchProduct.stock) < baseQuantity) {
       throw new Error(
         `Insufficient stock for ${product.name}. Available: ${branchProduct.stock} ${product.baseUnit?.abbreviation || 'units'}`
@@ -148,8 +202,10 @@ const createSale = async (userId, organizationId, data) => {
   const totalAmount = subtotal + taxAmount;
   const reference = generateReference();
 
-  // ---- Single transaction: sale + items + stock + payment ----
-  // If anything fails, everything rolls back (no orphan stock decrements).
+  const payments = normalizePayments(data, totalAmount);
+  const { paymentStatus } = resolvePaymentStatus(payments, totalAmount);
+
+  // ---- Single transaction: sale + items + stock + payments ----
   const sale = await prisma.$transaction(
     async (tx) => {
       const createdSale = await saleDb.createSale(
@@ -166,14 +222,13 @@ const createSale = async (userId, organizationId, data) => {
           discount: 0,
           totalAmount,
           status: 'COMPLETED',
-          paymentStatus: 'PAID',
+          paymentStatus,
         },
         tx
       );
 
       for (const p of preparedItems) {
         if (p.trackInventory) {
-          // Atomic guard: only decrement if enough stock remains right now.
           const result = await tx.kxTillBranchProduct.updateMany({
             where: {
               id: p.branchProduct.id,
@@ -209,13 +264,13 @@ const createSale = async (userId, organizationId, data) => {
         );
       }
 
-      if (data.paymentMethod) {
+      for (const pay of payments) {
         await saleDb.createSalePayment(
           {
             saleId: createdSale.id,
-            method: data.paymentMethod,
-            amount: totalAmount,
-            reference: data.paymentReference || null,
+            method: pay.method,
+            amount: pay.amount,
+            reference: pay.reference,
           },
           tx
         );
@@ -239,6 +294,7 @@ const createSale = async (userId, organizationId, data) => {
       customerId: customer?.id || null,
       customerName: customer?.name || 'Walk-in',
       shiftId,
+      payments: payments.map((p) => ({ method: p.method, amount: p.amount })),
     },
   });
 
@@ -246,7 +302,7 @@ const createSale = async (userId, organizationId, data) => {
 };
 
 // ============================================================
-// CREATE SALE (offline sync): unchanged
+// CREATE SALE (offline sync)
 // ============================================================
 
 const createOfflineSale = async (userId, organizationId, data) => {
@@ -260,7 +316,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     paymentReference,
   } = data;
 
-  // ---- Idempotency guard #1: early return ----
   if (clientSaleId) {
     const existing = await saleDb.findSaleByClientId(clientSaleId);
     if (existing) {
@@ -295,7 +350,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
 
   const reference = generateReference();
 
-  // ---- Pre-validate + compute everything before touching stock ----
   const preparedItems = [];
   let subtotal = 0;
   let taxAmount = 0;
@@ -344,7 +398,9 @@ const createOfflineSale = async (userId, organizationId, data) => {
 
   const totalAmount = subtotal + taxAmount;
 
-  // ---- Idempotency guard #2: re-check right before create ----
+  const payments = normalizePayments(data, totalAmount);
+  const { paymentStatus } = resolvePaymentStatus(payments, totalAmount);
+
   if (clientSaleId) {
     const existing = await saleDb.findSaleByClientId(clientSaleId);
     if (existing) {
@@ -352,7 +408,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     }
   }
 
-  // ---- Create the sale ----
   let sale;
   try {
     sale = await saleDb.createSale({
@@ -369,10 +424,9 @@ const createOfflineSale = async (userId, organizationId, data) => {
       discount: 0,
       totalAmount,
       status: 'COMPLETED',
-      paymentStatus: 'PAID',
+      paymentStatus,
     });
   } catch (err) {
-    // Race: another request created it between our check and our create.
     if (err.code === 'P2002' && clientSaleId) {
       const existing = await saleDb.findSaleByClientId(clientSaleId);
       if (existing) {
@@ -382,9 +436,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     throw err;
   }
 
-  // ---- Decrement stock + persist items ----
-  // Only after the sale row is safely created. If anything below fails,
-  // the sale exists and stock has moved: no orphan decrements.
   for (const p of preparedItems) {
     if (p.trackInventory) {
       await productDb.updateStock(p.branchProduct.id, -p.baseQuantity);
@@ -409,12 +460,12 @@ const createOfflineSale = async (userId, organizationId, data) => {
     });
   }
 
-  if (paymentMethod) {
+  for (const pay of payments) {
     await saleDb.createSalePayment({
       saleId: sale.id,
-      method: paymentMethod,
-      amount: totalAmount,
-      reference: paymentReference || null,
+      method: pay.method,
+      amount: pay.amount,
+      reference: pay.reference,
     });
   }
 
@@ -432,6 +483,7 @@ const createOfflineSale = async (userId, organizationId, data) => {
       customerId: customer?.id || null,
       customerName: customer?.name || customerName || null,
       shiftId,
+      payments: payments.map((p) => ({ method: p.method, amount: p.amount })),
     },
   });
 
@@ -492,12 +544,10 @@ const refundSale = async (organizationId, userId, saleId, branchId = null, shift
     shiftId,
   });
 
-  // Check branch isolation
   if (branchId && sale.branchId !== branchId) {
     throw new Error('You can only refund sales from your assigned branch');
   }
 
-  // If no branchId provided, check if user has all branches access
   if (!branchId) {
     const hasAllBranches = membership.hasAllBranches || false;
     if (!hasAllBranches) {
@@ -513,10 +563,8 @@ const refundSale = async (organizationId, userId, saleId, branchId = null, shift
     throw new Error('Sale is voided and cannot be refunded');
   }
 
-  // Restore stock + mark refunded in one transaction
   const updated = await prisma.$transaction(async (tx) => {
     for (const item of sale.items) {
-      // Untracked products never had stock decremented, so don't restore it.
       if (item.product && item.product.trackInventory === false) continue;
 
       await tx.kxTillBranchProduct.update({
