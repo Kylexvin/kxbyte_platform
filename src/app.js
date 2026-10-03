@@ -26,7 +26,7 @@ import branches from './modules/platform/branches/index.js';
 import support from './modules/platform/support/index.js';
 import customers from './modules/platform/customers/index.js';
 import uploadRoutes from './modules/platform/uploads/upload.routes.js';
-
+import publicRoutes from './modules/platform/public/public.routes.js';
 
 
 // ============================================================
@@ -205,6 +205,7 @@ branches.register(app);
 support.register(app);
 customers.register(app);
 
+app.use('/api/v1', publicRoutes);
 app.use('/api/v1', uploadRoutes);
 
 // ============================================================

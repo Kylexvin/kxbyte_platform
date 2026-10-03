@@ -46,6 +46,8 @@ model User {
   shiftsHandoverReq   KxTillShift[] @relation("ShiftHandoverRequestedBy")
   shiftsHandoverRes   KxTillShift[] @relation("ShiftHandoverResolvedBy")
   shiftsVarianceRev   KxTillShift[] @relation("ShiftVarianceReviewedBy")
+
+  creditLedger CustomerCreditLedger[]
   
   supportTickets          SupportTicket[] @relation("TicketReporter")
   assignedSupportTickets  SupportTicket[] @relation("TicketAssignee")
@@ -105,6 +107,8 @@ model Organization {
   isArchived  Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  creditLedger CustomerCreditLedger[]
 
   memberships Membership[]
   invitations Invitation[]
@@ -754,6 +758,8 @@ model KxTillSale {
 
   items          KxTillSaleItem[]
   payments       KxTillSalePayment[]
+
+  creditLedger CustomerCreditLedger[]
   
 
   createdAt      DateTime @default(now())
@@ -825,21 +831,69 @@ model KxTillSalePayment {
   saleId         String
   sale            KxTillSale @relation(fields: [saleId], references: [id], onDelete: Cascade)
 
-  // CASH, MPESA, CARD, BANK, OTHER
+  // CASH, MPESA, CARD, BANK, CREDIT, OTHER
   method         String
 
   amount         Decimal
 
-  // M-Pesa receipt, card reference, bank reference, etc.
   reference      String?
 
   metadata       Json?
 
   createdAt      DateTime @default(now())
 
+  creditLedgerId String?
+  creditLedger   CustomerCreditLedger? @relation("PaymentCreditLedger", fields: [creditLedgerId], references: [id], onDelete: SetNull)
+
   @@index([saleId])
   @@index([method])
+  @@index([creditLedgerId])
   @@map("kxtill_sale_payments")
+}
+
+// ============================================================
+// CUSTOMER CREDIT LEDGER (DENI)
+// ============================================================
+
+model CustomerCreditLedger {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  customerId     String
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  branchId       String?
+  branch         Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  // CHARGE, PAYMENT, ADJUSTMENT, REVERSAL
+  type           String
+
+  // Signed amount.
+  amount         Decimal
+
+  saleId         String?
+  sale           KxTillSale? @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  shiftId        String?
+  shift          KxTillShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  note           String?
+
+  createdById    String
+  createdBy      User     @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  createdAt      DateTime @default(now())
+
+  payments       KxTillSalePayment[] @relation("PaymentCreditLedger")
+
+  @@index([organizationId])
+  @@index([customerId])
+  @@index([customerId, createdAt])
+  @@index([type])
+  @@index([saleId])
+  @@index([shiftId])
+  @@map("customer_credit_ledger")
 }
 
 // ============================================================
@@ -909,6 +963,8 @@ model Branch {
   isActive       Boolean      @default(true)
   isDefault      Boolean      @default(false)
 
+
+  creditLedger CustomerCreditLedger[]
   assignments    BranchAssignment[]
   sales          KxTillSale[]
   branchProducts KxTillBranchProduct[]
@@ -1110,6 +1166,9 @@ model Customer {
   notes          String?
   isActive       Boolean  @default(true)
 
+  creditLimit  Decimal?
+  creditLedger CustomerCreditLedger[]
+
   kxtillSales KxTillSale[] @relation("CustomerSales")
 
   createdAt      DateTime @default(now())
@@ -1133,6 +1192,8 @@ model KxTillBranchSetting {
 
   shiftsEnabled     Boolean  @default(false)
   varianceThreshold Decimal  @default(50)
+
+  creditEnabled Boolean @default(false)
 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -1185,6 +1246,8 @@ model KxTillShift {
   sales                 KxTillSale[] @relation("ShiftSales")
   refunds               KxTillSale[] @relation("RefundShift")
 
+  creditLedger CustomerCreditLedger[]
+
   deletedAt             DateTime?
 
   createdAt             DateTime @default(now())
@@ -1195,4 +1258,20 @@ model KxTillShift {
   @@index([status])
   @@index([branchId, status])
   @@map("kxtill_shifts")
+}
+
+model Subscriber {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  newsletter   Boolean  @default(false)   // general KXBYTE news
+  waitlists    String[] @default([])      // ['kxinvoice', 'kxcrm']
+  source       String?                    // 'kxbyte.co.ke' | 'suite' | etc.
+  ipAddress    String?
+  userAgent    String?
+  unsubscribedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([newsletter])
+  @@map("subscribers")
 }
