@@ -39,6 +39,7 @@ const getSetting = async (organizationId, userId, branchId) => {
       branchId,
       shiftsEnabled: false,
       varianceThreshold: 50,
+      creditEnabled: false,
       isDefault: true,
     };
   }
@@ -47,6 +48,7 @@ const getSetting = async (organizationId, userId, branchId) => {
     branchId: setting.branchId,
     shiftsEnabled: setting.shiftsEnabled,
     varianceThreshold: Number(setting.varianceThreshold),
+    creditEnabled: !!setting.creditEnabled,
     isDefault: false,
   };
 };
@@ -79,14 +81,15 @@ const updateSetting = async (organizationId, userId, branchId, data) => {
   const updateData = {};
   if (data.shiftsEnabled !== undefined) updateData.shiftsEnabled = data.shiftsEnabled;
   if (data.varianceThreshold !== undefined) updateData.varianceThreshold = data.varianceThreshold;
+  if (data.creditEnabled !== undefined) updateData.creditEnabled = data.creditEnabled;
 
   const setting = await settingDb.upsertSetting(branchId, updateData);
 
   await audit.log({
     organizationId,
     userId,
-    action: 'KXTILL_SHIFT_SETTING_UPDATED',
-    resource: 'shift_setting',
+    action: 'KXTILL_BRANCH_SETTING_UPDATED',
+    resource: 'branch_setting',
     resourceId: setting.id,
     metadata: {
       branchId,
@@ -128,6 +131,7 @@ const updateSetting = async (organizationId, userId, branchId, data) => {
     branchId: setting.branchId,
     shiftsEnabled: setting.shiftsEnabled,
     varianceThreshold: Number(setting.varianceThreshold),
+    creditEnabled: !!setting.creditEnabled,
   };
 };
 

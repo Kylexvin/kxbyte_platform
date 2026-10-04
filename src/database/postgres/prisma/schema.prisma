@@ -39,6 +39,7 @@ model User {
   rejectedTransfers  KxTillTransfer[] @relation("RejectedBy")
   completedTransfers KxTillTransfer[] @relation("CompletedBy")
   refundedSales     KxTillSale[] @relation("RefundedByUser")
+  processedRefunds KxTillSaleRefund[] @relation("RefundProcessedBy")
 
   shiftsOwned         KxTillShift[] @relation("ShiftOwner")
   shiftsOpened        KxTillShift[] @relation("ShiftOpenedBy")
@@ -122,6 +123,7 @@ model Organization {
   paymentIPNRegistrations PaymentIPNRegistration[]
   kxtillProducts    KxTillProduct[]
   kxtillSales       KxTillSale[]
+  kxtillRefunds KxTillSaleRefund[]
   kxtillShifts KxTillShift[]
   kxtillStoreSetting KxTillStoreSetting?
   branches       Branch[]
@@ -733,7 +735,6 @@ model KxTillSale {
   reference      String?
   customerName   String?
 
- 
   clientSaleId   String? @unique
   deviceId       String?
   syncedAt       DateTime?
@@ -751,6 +752,7 @@ model KxTillSale {
   taxAmount      Decimal  @default(0)
   discount       Decimal  @default(0)
   totalAmount    Decimal
+  refundedAmount Decimal  @default(0)
   status         String   @default("COMPLETED")
   paymentStatus  String   @default("PAID")
   customerId     String?
@@ -759,8 +761,9 @@ model KxTillSale {
   items          KxTillSaleItem[]
   payments       KxTillSalePayment[]
 
+  refunds        KxTillSaleRefund[] @relation("SaleRefunds")
+
   creditLedger CustomerCreditLedger[]
-  
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -773,9 +776,9 @@ model KxTillSale {
   @@index([createdAt])
   @@index([reference])
   @@index([clientSaleId])
-  @@map("kxtill_sales")
   @@index([shiftId])
   @@index([refundShiftId])
+  @@map("kxtill_sales")
 }
 
 // ============================================================
@@ -790,14 +793,12 @@ model KxTillSaleItem {
   productId      String
   product        KxTillProduct @relation(fields: [productId], references: [id], onDelete: Restrict)
 
-  // ✅ Required
   branchProductId String
   branchProduct   KxTillBranchProduct @relation(fields: [branchProductId], references: [id], onDelete: Restrict)
 
   unitId         String
   unit           KxTillProductUnit @relation(fields: [unitId], references: [id])
 
-  // Historical snapshots
   unitName       String
   unitAbbrev     String
   unitType       String
@@ -810,6 +811,8 @@ model KxTillSaleItem {
   taxAmount      Decimal  @default(0)
   discount       Decimal  @default(0)
   total          Decimal
+
+  refundItems    KxTillSaleRefundItem[]
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -878,6 +881,11 @@ model CustomerCreditLedger {
   shiftId        String?
   shift          KxTillShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
 
+  // REVERSAL rows point back to the CHARGE they reverse.
+  reversalOfId   String?
+  reversalOf     CustomerCreditLedger? @relation("LedgerReversals", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversals      CustomerCreditLedger[] @relation("LedgerReversals")
+
   note           String?
 
   createdById    String
@@ -893,7 +901,75 @@ model CustomerCreditLedger {
   @@index([type])
   @@index([saleId])
   @@index([shiftId])
+  @@index([reversalOfId])
   @@map("customer_credit_ledger")
+}
+
+
+// ============================================================
+// KXTILL - SALE REFUNDS
+// ============================================================
+
+model KxTillSaleRefund {
+  id             String   @id @default(uuid())
+  reference      String   @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  saleId         String
+  sale           KxTillSale @relation("SaleRefunds", fields: [saleId], references: [id], onDelete: Cascade)
+
+  branchId       String
+  branch         Branch   @relation(fields: [branchId], references: [id], onDelete: Restrict)
+
+  shiftId        String?
+  shift          KxTillShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+
+  userId         String
+  user           User     @relation("RefundProcessedBy", fields: [userId], references: [id], onDelete: Restrict)
+
+  totalAmount    Decimal
+  cashAmount     Decimal  @default(0)
+  creditAmount   Decimal  @default(0)
+  otherAmount    Decimal  @default(0)
+
+  reason         String?
+  note           String?
+
+  items          KxTillSaleRefundItem[]
+
+  createdAt      DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([saleId])
+  @@index([branchId])
+  @@index([shiftId])
+  @@index([createdAt])
+  @@map("kxtill_sale_refunds")
+}
+
+// ============================================================
+// KXTILL - SALE REFUND ITEMS
+// ============================================================
+
+model KxTillSaleRefundItem {
+  id          String   @id @default(uuid())
+
+  refundId    String
+  refund      KxTillSaleRefund @relation(fields: [refundId], references: [id], onDelete: Cascade)
+
+  saleItemId  String
+  saleItem    KxTillSaleItem @relation(fields: [saleItemId], references: [id], onDelete: Restrict)
+
+  quantity    Decimal
+  unitPrice   Decimal
+  total       Decimal
+
+  createdAt   DateTime @default(now())
+
+  @@index([refundId])
+  @@index([saleItemId])
+  @@map("kxtill_sale_refund_items")
 }
 
 // ============================================================
@@ -967,6 +1043,7 @@ model Branch {
   creditLedger CustomerCreditLedger[]
   assignments    BranchAssignment[]
   sales          KxTillSale[]
+  kxtillRefunds KxTillSaleRefund[]
   branchProducts KxTillBranchProduct[]
 
   kxtillBranchSetting KxTillBranchSetting?
@@ -1244,9 +1321,11 @@ model KxTillShift {
   varianceNote          String?
 
   sales                 KxTillSale[] @relation("ShiftSales")
+
   refunds               KxTillSale[] @relation("RefundShift")
 
   creditLedger CustomerCreditLedger[]
+  processedRefunds KxTillSaleRefund[]
 
   deletedAt             DateTime?
 

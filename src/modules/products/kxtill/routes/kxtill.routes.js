@@ -15,6 +15,7 @@ import dashboardSyncController from '../controllers/dashboardSync.controller.js'
 import billingController from '../controllers/billing.controller.js';
 import shiftController from '../shift/controllers/shift.controller.js';
 import shiftSettingController from '../shift/controllers/setting.controller.js';
+import creditController from '../credit/controllers/credit.controller.js';
 import shiftValidator from '../shift/validators/shift.validator.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 import subscriptionMiddleware from '../../../platform/subscriptions/middleware/subscription.middleware.js';
@@ -61,6 +62,7 @@ router.get('/branches/:branchId', guard, branchController.getBranchOverview);
 router.post('/sales', guard, saleController.createSale);
 router.post('/sales/offline', guard, saleController.createOfflineSale);
 router.get('/sales', guard, saleController.getSales);
+router.get('/sales/:saleId/refundable', guard, saleController.getSaleRefundableState);
 router.get('/sales/:saleId', guard, saleController.getSale);
 router.post('/sales/:saleId/refund', guard, saleController.refundSale);
 router.get('/sales/:saleId/receipt', guard, receiptController.generateReceipt);
@@ -173,9 +175,18 @@ router.delete('/customers/:customerId', guard, customerController.deleteCustomer
 router.get('/customers/:customerId', guard, customerController.getCustomer);
 router.get('/customers/:customerId/sales', guard, customerController.getCustomerSales);
 
-//====
+// ============================================================
+// CUSTOMER CREDIT (DENI)
+// ============================================================
+router.get('/customers/:customerId/credit', guard, creditController.getBalance);
+router.get('/customers/:customerId/credit/ledger', guard, creditController.getLedger);
+router.post('/customers/:customerId/credit/payments', guard, creditController.recordPayment);
+router.post('/customers/:customerId/credit/adjustments', guard, creditController.recordAdjustment);
+router.patch('/customers/:customerId/credit/limit', guard, creditController.setCreditLimit);
+
+//==============================================================
 // Billing
-//====
+//==============================================================
 router.get('/billing', billingController.get);
 router.get('/billing/payments', billingController.payments);
 

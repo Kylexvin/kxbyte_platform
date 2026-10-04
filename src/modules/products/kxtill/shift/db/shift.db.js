@@ -204,17 +204,11 @@ const sumCashPaymentsByShift = async (shiftId) => {
 
 // Aggregate cash refunds charged against a shift
 const sumCashRefundsByShift = async (shiftId) => {
-  const result = await prisma.kxTillSalePayment.aggregate({
-    where: {
-      method: 'CASH',
-      sale: {
-        refundShiftId: shiftId,
-        status: 'REFUNDED',
-      },
-    },
-    _sum: { amount: true },
+  const result = await prisma.kxTillSaleRefund.aggregate({
+    where: { shiftId },
+    _sum: { cashAmount: true },
   });
-  return Number(result._sum.amount || 0);
+  return Number(result._sum.cashAmount || 0);
 };
 
 // Count non-deleted sales attached to a shift (used by cancelShift guard)

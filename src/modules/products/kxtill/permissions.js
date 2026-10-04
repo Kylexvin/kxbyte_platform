@@ -106,7 +106,19 @@ const permissions = [
     name: 'Shift Settings',
     description: 'Enable/disable shifts per branch',
   },
-
+  // ============================================================
+  // CREDIT (DENI)
+  // ============================================================
+  {
+    key: 'kxtill.credit.view',
+    name: 'View Credit Ledger',
+    description: 'View customer credit balances and history',
+  },
+  {
+    key: 'kxtill.credit.adjust',
+    name: 'Adjust Credit',
+    description: 'Adjust customer credit balance and set credit limits',
+  },
   // ============================================================
   // SETTINGS
   // ============================================================

@@ -3,6 +3,7 @@
 import prisma from '../../../../../database/postgres/prisma.js';
 import shiftDb from '../db/shift.db.js';
 import settingDb from '../db/setting.db.js';
+import creditDb from '../../credit/db/credit.db.js';
 import orgDb from '../../../../platform/organizations/db/org.db.js';
 import branchDb from '../../../../platform/branches/db/branch.db.js';
 import audit from '../../../../platform/audit/index.js';
@@ -20,7 +21,8 @@ const computeExpectedCash = async (shift) => {
   const openingFloat = Number(shift.openingFloat);
   const cashIn = await shiftDb.sumCashPaymentsByShift(shift.id);
   const cashOut = await shiftDb.sumCashRefundsByShift(shift.id);
-  return openingFloat + cashIn - cashOut;
+  const creditRepayments = await creditDb.sumRepaymentsByShift(shift.id);
+  return openingFloat + cashIn - cashOut + creditRepayments;
 };
 
 const getThreshold = async (branchId) => {
