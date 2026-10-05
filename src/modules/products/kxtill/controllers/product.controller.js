@@ -364,6 +364,35 @@ const updateBranchProductStock = async (req, res) => {
   }
 }; 
 
+const generateUnitBarcode = async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { organizationId, productId, unitId } = req.params;
+    const unit = await productService.generateUnitBarcode(
+      organizationId,
+      userId,
+      productId,
+      unitId
+    );
+    res.status(200).json({ unit });
+  } catch (error) {
+    if (error.message === 'Organization not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    if (error.message === 'You do not have access to this organization' ||
+        error.message === 'You do not have permission to update products') {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'Product not found' || error.message === 'Unit not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Generate unit barcode error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 const bulkCreateProducts = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -567,5 +596,6 @@ export default {
   getBranchProductsForSync,
   updateBranchProduct,
   removeBranchProduct,
+  generateUnitBarcode,
 
 }; 

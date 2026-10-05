@@ -4,6 +4,58 @@ import settingDb from '../db/setting.db.js';
 import orgDb from '../../../platform/organizations/db/org.db.js';
 import audit from '../../../platform/audit/index.js';
 
+// ============================================================
+// ALLOW-LIST — only these keys can be written to the DB
+// ============================================================
+const UPDATABLE_FIELDS = [
+  // Store info
+  'shopName',
+  'shopPhone',
+  'shopEmail',
+  'shopAddress',
+  'taxNumber',
+
+  // Receipt
+  'receiptHeader',
+  'receiptFooter',
+  'receiptTemplate',
+  'showTax',
+  'showCustomer',
+  'showCashier',
+
+  // General
+  'currency',
+  'timezone',
+  'decimalPlaces',
+  'defaultPaymentMethod',
+
+  // Notifications (kept in schema; UI toggles removed until module ships)
+  'lowStockAlerts',
+  'dailySalesReport',
+  'weeklySummary',
+  'refundNotifications',
+
+  // Security (dummy — kept in schema, not surfaced in UI)
+  'sessionTimeout',
+  'requirePinForRefund',
+
+  // Branch
+  'allowBranchSwitch',
+];
+
+const pickAllowed = (data) => {
+  const out = {};
+  for (const key of UPDATABLE_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(data, key)) {
+      out[key] = data[key];
+    }
+  }
+  return out;
+};
+
+// ============================================================
+// GET
+// ============================================================
 const getSettings = async (organizationId, userId) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
@@ -24,6 +76,7 @@ const getSettings = async (organizationId, userId) => {
     // Receipt
     receiptHeader: settings?.receiptHeader || '',
     receiptFooter: settings?.receiptFooter || 'Thank you for shopping!',
+    receiptTemplate: settings?.receiptTemplate || 'classic',
     showTax: settings?.showTax ?? false,
     showCustomer: settings?.showCustomer ?? false,
     showCashier: settings?.showCashier ?? true,
@@ -43,17 +96,15 @@ const getSettings = async (organizationId, userId) => {
     // Security
     sessionTimeout: settings?.sessionTimeout ?? 30,
     requirePinForRefund: settings?.requirePinForRefund ?? true,
-    // moved to top level
-    // auditLogRetention: settings?.auditLogRetention ?? 90,
 
     // Branch
     allowBranchSwitch: settings?.allowBranchSwitch ?? true,
-
-    // Receipt Template
-    receiptTemplate: settings?.receiptTemplate || 'classic',
   };
 };
 
+// ============================================================
+// UPDATE
+// ============================================================
 const updateSettings = async (organizationId, userId, data) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
@@ -65,7 +116,10 @@ const updateSettings = async (organizationId, userId, data) => {
     throw new Error('Only the organization owner can update store settings');
   }
 
-  const settings = await settingDb.upsertSetting(organizationId, data);
+  // Strip anything not on the allow-list before touching the DB
+  const safeData = pickAllowed(data);
+
+  const settings = await settingDb.upsertSetting(organizationId, safeData);
 
   await audit.log({
     organizationId,
@@ -74,7 +128,7 @@ const updateSettings = async (organizationId, userId, data) => {
     resource: 'store_settings',
     resourceId: settings.id,
     metadata: {
-      updatedFields: Object.keys(data),
+      updatedFields: Object.keys(safeData),
     },
   });
 

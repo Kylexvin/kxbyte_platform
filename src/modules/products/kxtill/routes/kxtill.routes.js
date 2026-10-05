@@ -16,6 +16,7 @@ import billingController from '../controllers/billing.controller.js';
 import shiftController from '../shift/controllers/shift.controller.js';
 import shiftSettingController from '../shift/controllers/setting.controller.js';
 import creditController from '../credit/controllers/credit.controller.js';
+import onboardingController from '../controllers/onboarding.controller.js';
 import shiftValidator from '../shift/validators/shift.validator.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 import subscriptionMiddleware from '../../../platform/subscriptions/middleware/subscription.middleware.js';
@@ -27,6 +28,14 @@ router.use(authMiddleware.authenticate);
 // Subscription guard for KxTill
 const guard = subscriptionMiddleware.requireActiveSubscription('kxtill');
 
+
+
+// ============================================================
+// ONBOARDING ROUTES
+// ============================================================
+router.get('/onboarding/:organizationId', guard, onboardingController.getState);
+router.post('/onboarding/:organizationId/dismiss', guard, onboardingController.dismiss);
+
 // ============================================================
 // PRODUCT ROUTES
 // ============================================================
@@ -34,6 +43,7 @@ router.post('/products', guard, productController.createProduct);
 router.get('/products', guard, productController.getProducts);
 router.post('/products/bulk', guard, productController.bulkCreateProducts);
 router.get('/products/search', guard, productController.searchProducts);
+router.post('/products/:productId/units/:unitId/barcode', guard, productController.generateUnitBarcode);
 router.get('/products/barcode/:barcode', guard, productController.getProductByBarcode);
 
 router.patch('/products/:productId/units/:unitId', guard, productController.updateProductUnit);

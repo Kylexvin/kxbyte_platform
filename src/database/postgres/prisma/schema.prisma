@@ -100,6 +100,7 @@ model Organization {
   phone       String?
   address     String?
   country     String
+  kxtillOnboardingState KxTillOnboardingState?
   currency    String   @default("KES")
   timezone    String   @default("Africa/Nairobi")
   auditLogRetention Int @default(45)
@@ -108,6 +109,7 @@ model Organization {
   isArchived  Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
 
   creditLedger CustomerCreditLedger[]
 
@@ -537,6 +539,24 @@ model PaymentIPNRegistration {
   @@unique([organizationId, provider, ipnId])
   @@index([organizationId])
   @@map("payment_ipn_registrations")
+}
+
+// ============================================================
+// KXTILL - ONBOARDING STATE (per org)
+// ============================================================
+
+model KxTillOnboardingState {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  isDismissed    Boolean  @default(false)
+  completedAt    DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("kxtill_onboarding_state")
 }
 
 

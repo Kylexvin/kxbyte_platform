@@ -177,7 +177,7 @@ const getDashboardSummary = async (organizationId, userId, period = '30d', branc
     totalRevenue: currentTotal,
     activeUsers: activeUsers || 0,
     conversionRate: totalBranchMembers > 0 ? Math.round((activeUsers / totalBranchMembers) * 100) : 0,
-    averageOrderValue: totalSalesCount > 0 ? Math.round(currentTotal / totalSalesCount) : 0,
+    averageOrderValue: totalSalesCount > 0 ? currentTotal / totalSalesCount : 0,
     growth: Math.round(growth * 10) / 10,
     inventoryItems: Number(inventoryItems._sum?.stock || 0),
     lowStock: lowStock || 0,
@@ -266,7 +266,7 @@ const getTodayStats = async (organizationId, userId, branchId = null) => {
   return {
     todaySales,
     transactions,
-    profit: Math.round(profit),
+    profit,
     itemsSold: Number(itemsSold._sum?.quantity || 0),
   };
 };

@@ -546,6 +546,86 @@ const updateProductUnit = async (organizationId, userId, productId, unitId, data
   return updated;
 };
 
+const generateUnitBarcode = async (organizationId, userId, productId, unitId) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.inventory.update');
+  if (!hasPermission) {
+    throw new Error('You do not have permission to update products');
+  }
+
+  const product = await productDb.findProductById(productId, organizationId);
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  const unit = await productDb.findUnitById(unitId, productId);
+  if (!unit) {
+    throw new Error('Unit not found');
+  }
+
+  if (unit.barcode) {
+    return unit; // already has one, return as-is
+  }
+
+  // Reserved-range EAN-13: prefix 200 (in-store use only)
+  // Format: 200 + 9-digit sequence + check digit
+  const code = await prisma.$transaction(async (tx) => {
+    // Lock to prevent concurrent generation collisions
+    const existing = await tx.kxTillProductUnit.findMany({
+      where: {
+        barcode: { startsWith: '200' },
+        product: { organizationId },
+      },
+      select: { barcode: true },
+      orderBy: { barcode: 'desc' },
+      take: 1,
+    });
+
+    let nextSeq = 1;
+    if (existing.length > 0) {
+      const last = existing[0].barcode; // "200XXXXXXXXC"
+      const seqStr = last.slice(3, 12);  // 9 digits
+      nextSeq = parseInt(seqStr, 10) + 1;
+    }
+
+    const seqStr = String(nextSeq).padStart(9, '0');
+    const twelveDigits = `200${seqStr}`;
+    const checkDigit = computeEan13CheckDigit(twelveDigits);
+    return `${twelveDigits}${checkDigit}`;
+  });
+
+  const updated = await productDb.updateProductUnit(unitId, { barcode: code });
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'KXTILL_PRODUCT_UNIT_BARCODE_GENERATED',
+    resource: 'product_unit',
+    resourceId: unitId,
+    metadata: {
+      productId,
+      barcode: code,
+    },
+  });
+
+  return updated;
+};
+
+// EAN-13 check digit — standard algorithm
+const computeEan13CheckDigit = (twelveDigits) => {
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const digit = Number(twelveDigits[i]);
+    sum += i % 2 === 0 ? digit : digit * 3;
+  }
+  const remainder = sum % 10;
+  return String(remainder === 0 ? 0 : 10 - remainder);
+};
+
 const getProductsForSync = async (organizationId, since, limit = 50, offset = 0, branchId) => {
   const result = await productDb.findProductsForSync(organizationId, since, limit, offset, branchId);
   
@@ -623,4 +703,5 @@ export default {
   getBranchProductsForSync,
   updateBranchProduct,
   removeBranchProduct,
+  generateUnitBarcode,
 };
