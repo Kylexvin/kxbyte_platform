@@ -33,9 +33,8 @@ const guard = subscriptionMiddleware.requireActiveSubscription('kxtill');
 // ============================================================
 // ONBOARDING ROUTES
 // ============================================================
-router.get('/onboarding/:organizationId', guard, onboardingController.getState);
-router.post('/onboarding/:organizationId/dismiss', guard, onboardingController.dismiss);
-
+router.get('/onboarding', guard, onboardingController.getState);
+router.post('/onboarding/dismiss', guard, onboardingController.dismiss);
 // ============================================================
 // PRODUCT ROUTES
 // ============================================================

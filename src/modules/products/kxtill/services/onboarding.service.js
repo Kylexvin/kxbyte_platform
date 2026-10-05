@@ -19,7 +19,7 @@ const getOnboardingState = async (organizationId, userId) => {
     throw new Error('Organization not found');
   }
 
-  // Parallel fetches — cheap counts + settings row
+  // Parallel fetches — cheap counts + settings row + dismissal state
   const [productCount, salesCount, settings, state] = await Promise.all([
     prisma.kxTillProduct.count({
       where: { organizationId, isActive: true },
@@ -31,12 +31,19 @@ const getOnboardingState = async (organizationId, userId) => {
     onboardingDb.findByOrganization(organizationId),
   ]);
 
-  // Store info done when the org owner has filled in both shop name and tax number
-  const hasShopName = !!(
-    settings?.shopName?.trim() || org?.name?.trim()
+  // Store info is done as soon as ANY shop detail exists.
+  // The user does not have to fill every field — one is enough.
+  // org.name counts as a shop detail, so this is effectively "true" from
+  // day one for every org. Tax number, phone, address are all optional.
+  const hasAnyShopDetail = !!(
+    settings?.shopName?.trim() ||
+    settings?.shopPhone?.trim() ||
+    settings?.shopEmail?.trim() ||
+    settings?.shopAddress?.trim() ||
+    settings?.taxNumber?.trim() ||
+    org?.name?.trim()
   );
-  const hasTaxNumber = !!settings?.taxNumber?.trim();
-  const storeInfoDone = hasShopName && hasTaxNumber;
+  const storeInfoDone = hasAnyShopDetail;
 
   const productDone = productCount > 0;
   const firstSaleDone = salesCount > 0;
@@ -54,7 +61,7 @@ const getOnboardingState = async (organizationId, userId) => {
 
   const isComplete = firstSaleDone;
 
-  // Persist completion time on first transition (idempotent)
+  // Persist completion time on first transition (idempotent, fire-and-forget)
   if (isComplete && !state?.completedAt) {
     onboardingDb.markCompleted(organizationId).catch((err) => {
       console.error('Failed to mark onboarding complete:', err);
