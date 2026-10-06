@@ -1,0 +1,22 @@
+// src/database/postgres/prisma/verticals/pharmacy/config.prisma
+
+// ============================================================
+// KXTILL PHARMACY - VERTICAL CONFIGURATION (per org)
+// ============================================================
+
+model KxTillPharmacyConfig {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  isEnabled             Boolean @default(true)
+  expiryWarningDays     Int     @default(90)
+  blockExpiredSales     Boolean @default(true)
+  requireBatchOnSale    Boolean @default(true)
+  defaultDispensingUnit String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("kxtill_pharmacy_config")
+}

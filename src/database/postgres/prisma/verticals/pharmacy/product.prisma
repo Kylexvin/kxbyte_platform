@@ -1,0 +1,24 @@
+// ============================================================
+// KXTILL PHARMACY - PRODUCT IDENTITY (extends KxTillProduct)
+// ============================================================
+
+model KxTillPharmacyProduct {
+  id        String        @id @default(uuid())
+  productId String        @unique
+  product   KxTillProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  genericName          String?
+  brandName            String?
+  strength             String?
+  dosageForm           String?   // TABLET, CAPSULE, SYRUP, INJECTION...
+  route                String?   // ORAL, TOPICAL...
+  prescriptionCategory String?   // OTC, POM, CONTROLLED...
+  packSize             String?
+  storageConditions    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([genericName])
+  @@map("kxtill_pharmacy_products")
+}

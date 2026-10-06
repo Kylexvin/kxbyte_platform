@@ -26,6 +26,10 @@ model User {
 
   authoredSupportGuides SupportGuide[] @relation("GuideAuthor")
 
+  // ═══ VERTICAL EXTENSIONS ═══
+  pharmacyStockMovements KxTillPharmacyStockMovement[]
+
+  
   sessions          Session[]
   verificationTokens VerificationToken[]
   auditEvents       AuditEvent[]
@@ -100,6 +104,8 @@ model Organization {
   phone       String?
   address     String?
   country     String
+  // ═══ VERTICAL EXTENSIONS ═══
+  pharmacyConfig KxTillPharmacyConfig?
   kxtillOnboardingState KxTillOnboardingState?
   currency    String   @default("KES")
   timezone    String   @default("Africa/Nairobi")
@@ -541,6 +547,7 @@ model PaymentIPNRegistration {
   @@map("payment_ipn_registrations")
 }
 
+
 // ============================================================
 // KXTILL - ONBOARDING STATE (per org)
 // ============================================================
@@ -576,6 +583,10 @@ model KxTillProduct {
   isActive       Boolean  @default(true)
   trackInventory Boolean  @default(true)
 
+  // ═══ VERTICAL EXTENSIONS ═══
+  pharmacyProduct KxTillPharmacyProduct?
+  pharmacyBatches KxTillPharmacyBatch[]
+
   baseUnitId     String?  @unique
   baseUnit       KxTillProductUnit? @relation("KxTillBaseUnit", fields: [baseUnitId], references: [id])
   units          KxTillProductUnit[] @relation("KxTillProductUnits")
@@ -610,6 +621,9 @@ model KxTillBranchProduct {
   isAvailable    Boolean  @default(true)
   stock          Decimal  @default(0)
   minStock       Decimal  @default(0)
+
+  // ═══ VERTICAL EXTENSIONS ═══
+  pharmacyBatchStocks KxTillPharmacyBatchStock[]
 
   unitPrices     KxTillBranchProductUnitPrice[]
   saleItems      KxTillSaleItem[]
@@ -831,6 +845,9 @@ model KxTillSaleItem {
   taxAmount      Decimal  @default(0)
   discount       Decimal  @default(0)
   total          Decimal
+
+  // ═══ VERTICAL EXTENSIONS ═══
+  pharmacyAllocations KxTillPharmacySaleBatchAllocation[]
 
   refundItems    KxTillSaleRefundItem[]
 

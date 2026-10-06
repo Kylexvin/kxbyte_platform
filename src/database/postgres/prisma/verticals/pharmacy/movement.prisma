@@ -1,0 +1,31 @@
+// src/database/postgres/prisma/verticals/pharmacy/movement.prisma
+
+// ============================================================
+// KXTILL PHARMACY - STOCK MOVEMENTS (audit trail)
+// ============================================================
+
+model KxTillPharmacyStockMovement {
+  id           String                   @id @default(uuid())
+  batchStockId String
+  batchStock   KxTillPharmacyBatchStock @relation(fields: [batchStockId], references: [id], onDelete: Cascade)
+
+  batchId String
+  batch   KxTillPharmacyBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  movementType  String
+  quantity      Decimal
+  reason        String?
+  referenceId   String?
+  referenceType String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+
+  @@index([batchStockId])
+  @@index([batchId])
+  @@index([movementType])
+  @@index([referenceId])
+  @@map("kxtill_pharmacy_stock_movements")
+}

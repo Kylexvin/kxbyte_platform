@@ -1,0 +1,27 @@
+// src/database/postgres/prisma/verticals/pharmacy/sale-allocation.prisma
+
+// ============================================================
+// KXTILL PHARMACY - SALE → BATCH ALLOCATION
+// ============================================================
+
+model KxTillPharmacySaleBatchAllocation {
+  id         String        @id @default(uuid())
+  saleItemId String
+  saleItem   KxTillSaleItem @relation(fields: [saleItemId], references: [id], onDelete: Cascade)
+
+  batchStockId String
+  batchStock   KxTillPharmacyBatchStock @relation(fields: [batchStockId], references: [id], onDelete: Restrict)
+
+  batchId String
+  batch   KxTillPharmacyBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  quantity Decimal
+  unitCost Decimal
+
+  createdAt DateTime @default(now())
+
+  @@index([saleItemId])
+  @@index([batchStockId])
+  @@index([batchId])
+  @@map("kxtill_pharmacy_sale_batch_allocations")
+}
