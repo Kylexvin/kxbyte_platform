@@ -67,7 +67,6 @@ const deactivateOrganizationProduct = async (organizationId, productId) => {
   });
 };
 
-
 const updateOrganizationProduct = async (organizationId, productId, data) => {
   return prisma.organizationProduct.update({
     where: {
@@ -88,6 +87,37 @@ const isProductActivated = async (organizationId, productKey) => {
   return !!orgProduct && orgProduct.isActive;
 };
 
+// ============================================================
+// PRODUCT INSTANCES (vertical-aware activations)
+// ============================================================
+
+const findInstancesByOrganizationProduct = async (organizationProductId) => {
+  return prisma.productInstance.findMany({
+    where: { organizationProductId },
+    orderBy: { createdAt: 'asc' },
+  });
+};
+
+const findInstance = async (organizationProductId, vertical, name) => {
+  return prisma.productInstance.findUnique({
+    where: {
+      organizationProductId_vertical_name: {
+        organizationProductId,
+        vertical,
+        name,
+      },
+    },
+  });
+};
+
+const createProductInstance = async (data) => {
+  return prisma.productInstance.create({ data });
+};
+
+const createPharmacyConfig = async (data) => {
+  return prisma.kxTillPharmacyConfig.create({ data });
+};
+
 export default {
   findAllProducts,
   findProductByKey,
@@ -96,6 +126,12 @@ export default {
   findOrganizationProducts,
   createOrganizationProduct,
   deactivateOrganizationProduct,
-  updateOrganizationProduct, 
+  updateOrganizationProduct,
   isProductActivated,
+
+  // Product instances
+  findInstancesByOrganizationProduct,
+  findInstance,
+  createProductInstance,
+  createPharmacyConfig,
 };

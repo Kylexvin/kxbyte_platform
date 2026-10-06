@@ -146,7 +146,7 @@ const getOrganizationProducts = async (organizationId, userId) => {
   }));
 };
 
-const activateProduct = async (organizationId, userId, productKey) => {
+const activateProduct = async (organizationId, userId, productKey, vertical = 'retail') => {
   if (productKey === 'admin') {
     throw new Error('Cannot activate internal platform product');
   }
@@ -203,18 +203,57 @@ const activateProduct = async (organizationId, userId, productKey) => {
   }
 
   if (existing) {
-    // Reactivate
+    // ─── Reactivate path ───
     await productDb.updateOrganizationProduct(organizationId, product.id, { isActive: true });
     await reactivateSubscription(organizationId, productKey);
+
+    // Backfill: if this activation has no instances yet, create a retail one.
+    // This covers legacy orgs that activated kxtill before ProductInstance existed.
+    const instances = await productDb.findInstancesByOrganizationProduct(existing.id);
+    if (instances.length === 0) {
+      const defaultName = `${organization.name} Retail`;
+      const alreadyExists = await productDb.findInstance(existing.id, 'retail', defaultName);
+      if (!alreadyExists) {
+        await productDb.createProductInstance({
+          organizationProductId: existing.id,
+          vertical: 'retail',
+          name: defaultName,
+          isActive: true,
+        });
+        console.log(`[products] Backfilled retail instance for org ${organizationId}`);
+      }
+    }
   } else {
-    // New activation
-    await productDb.createOrganizationProduct({
+    // ─── New activation path ───
+    const orgProduct = await productDb.createOrganizationProduct({
       organizationId,
       productId: product.id,
       activatedAt: new Date(),
       isActive: true,
     });
     await createSubscriptionForProduct(organizationId, productKey);
+
+    // Create the vertical instance
+    const instanceName = `${organization.name} ${vertical.charAt(0).toUpperCase() + vertical.slice(1)}`;
+    const instance = await productDb.createProductInstance({
+      organizationProductId: orgProduct.id,
+      vertical,
+      name: instanceName,
+      isActive: true,
+    });
+    console.log(`[products] Created ${vertical} instance for org ${organizationId}: ${instance.id}`);
+
+    // If pharmacy, attach the config
+    if (vertical === 'pharmacy') {
+      await productDb.createPharmacyConfig({
+        productInstanceId: instance.id,
+        isEnabled: true,
+        expiryWarningDays: 90,
+        blockExpiredSales: true,
+        requireBatchOnSale: true,
+      });
+      console.log(`[products] Created pharmacy config for instance ${instance.id}`);
+    }
   }
 
   await audit.log({
@@ -223,7 +262,7 @@ const activateProduct = async (organizationId, userId, productKey) => {
     action: 'PRODUCT_ACTIVATED',
     resource: 'product',
     resourceId: product.id,
-    metadata: { productKey: product.key, productName: product.name },
+    metadata: { productKey: product.key, productName: product.name, vertical },
   });
 
   return await buildResponse();

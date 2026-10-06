@@ -50,9 +50,9 @@ const activateProduct = async (req, res) => {
     }
 
     const { organizationId } = req.params;
-    const { productKey } = req.body;
+    const { productKey, vertical } = req.body;
 
-    const result = await productService.activateProduct(organizationId, userId, productKey);
+    const result = await productService.activateProduct(organizationId, userId, productKey, vertical);
     res.status(201).json(result);
   } catch (error) {
     if (error.message === 'Organization not found' ||

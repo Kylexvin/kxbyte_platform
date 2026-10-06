@@ -8,23 +8,24 @@ const KxTill = {
   key: 'kxtill',
   name: 'KxTill',
   version: '1.0.0',
-  
+  vertical: 'retail',              
+
   permissions,
 
-subscription: {
-  plans: [
-    {
-      key: 'standard',
-      name: 'Standard',
-      price: 0,
-      currency: 'KES',
-      interval: 'MONTHLY',
-      trialDays: 14,
-      features: [],
-      limits: null,
-    },
-  ],
-},
+  subscription: {
+    plans: [
+      {
+        key: 'standard',
+        name: 'Standard',
+        price: 0,
+        currency: 'KES',
+        interval: 'MONTHLY',
+        trialDays: 14,
+        features: [],
+        limits: null,
+      },
+    ],
+  },
 
   initialize: async ({ organizationId }) => {
     console.log(`[KxTill] Initializing for organization ${organizationId}`);
