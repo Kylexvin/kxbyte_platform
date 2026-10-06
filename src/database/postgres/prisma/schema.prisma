@@ -29,7 +29,7 @@ model User {
   // ═══ VERTICAL EXTENSIONS ═══
   pharmacyStockMovements KxTillPharmacyStockMovement[]
 
-  
+
   sessions          Session[]
   verificationTokens VerificationToken[]
   auditEvents       AuditEvent[]
@@ -103,9 +103,7 @@ model Organization {
   email       String?
   phone       String?
   address     String?
-  country     String
-  // ═══ VERTICAL EXTENSIONS ═══
-  pharmacyConfig KxTillPharmacyConfig?
+  country     String  
   kxtillOnboardingState KxTillOnboardingState?
   currency    String   @default("KES")
   timezone    String   @default("Africa/Nairobi")
@@ -226,6 +224,8 @@ model OrganizationProduct {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   productId      String
   product        Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  // ═══ VERTICAL EXTENSIONS ═══
+  instances ProductInstance[]
   activatedAt    DateTime @default(now())
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
@@ -235,6 +235,32 @@ model OrganizationProduct {
   @@index([organizationId])
   @@index([productId])
   @@map("organization_products")
+}
+
+// ============================================================
+// PRODUCT INSTANCES — vertical-aware activations
+// An OrganizationProduct can host multiple instances.
+// KxTill retail, KxTill pharmacy, etc. are separate instances.
+// ============================================================
+
+model ProductInstance {
+  id                    String              @id @default(uuid())
+  organizationProductId String
+  organizationProduct   OrganizationProduct @relation(fields: [organizationProductId], references: [id], onDelete: Cascade)
+
+  vertical   String   // "retail" | "pharmacy" | "restaurant" | "hotel"
+  name       String   // e.g. "Nairobi CBD Pharmacy"
+  isActive   Boolean  @default(true)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  pharmacyConfig KxTillPharmacyConfig?
+
+  @@unique([organizationProductId, vertical, name])
+  @@index([organizationProductId])
+  @@index([vertical])
+  @@map("product_instances")
 }
 
 model TrialBurn {

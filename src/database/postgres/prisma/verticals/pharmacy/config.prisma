@@ -1,13 +1,15 @@
 // src/database/postgres/prisma/verticals/pharmacy/config.prisma
 
 // ============================================================
-// KXTILL PHARMACY - VERTICAL CONFIGURATION (per org)
+// KXTILL PHARMACY - VERTICAL CONFIGURATION
+// Belongs to a ProductInstance (vertical = "pharmacy"),
+// NOT directly to an organization.
 // ============================================================
 
 model KxTillPharmacyConfig {
-  id             String   @id @default(uuid())
-  organizationId String   @unique
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id                String          @id @default(uuid())
+  productInstanceId String          @unique
+  productInstance   ProductInstance @relation(fields: [productInstanceId], references: [id], onDelete: Cascade)
 
   isEnabled             Boolean @default(true)
   expiryWarningDays     Int     @default(90)
