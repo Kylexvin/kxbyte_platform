@@ -20,6 +20,8 @@ import onboardingController from '../controllers/onboarding.controller.js';
 import shiftValidator from '../shift/validators/shift.validator.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 import subscriptionMiddleware from '../../../platform/subscriptions/middleware/subscription.middleware.js';
+import pharmacyVertical from '../verticals/pharmacy/index.js';
+
 
 const router = express.Router({ mergeParams: true });
 
@@ -198,5 +200,21 @@ router.patch('/customers/:customerId/credit/limit', guard, creditController.setC
 //==============================================================
 router.get('/billing', billingController.get);
 router.get('/billing/payments', billingController.payments);
+
+// ============================================================
+// VERTICAL ROUTES
+// ============================================================
+//
+// Pharmacy endpoints. Gated by requirePharmacyInstance — org must have an
+// active pharmacy ProductInstance to reach any route below.
+//
+// Mounted at: /api/v1/organizations/:organizationId/kxtill/pharmacy/*
+//
+router.use(
+  '/pharmacy',
+  guard,
+  pharmacyVertical.middleware.requireInstance,
+  pharmacyVertical.routes
+);
 
 export default router;
