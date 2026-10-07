@@ -114,8 +114,14 @@ const resolvePaymentStatus = (payments, totalAmount) => {
 
 // Public entry point — opens the transaction, delegates to createSaleTx,
 // then performs post-commit side effects (audit + read-back).
+// ============================================================
+// CREATE SALE (online)
+// ============================================================
+
+// Public entry point — opens the transaction, delegates to createSaleTx,
+// then performs post-commit side effects (audit + read-back).
 const createSale = async (userId, organizationId, data) => {
-  const saleId = await prisma.$transaction(
+  const { saleId } = await prisma.$transaction(
     (tx) => createSaleTx(tx, userId, organizationId, data),
     { maxWait: 5000, timeout: 15000 }
   );
@@ -153,7 +159,16 @@ const createSale = async (userId, organizationId, data) => {
 // Transaction-aware core — composable primitive for verticals.
 // MUST receive an active Prisma.TransactionClient as `tx`.
 // Does NOT open its own transaction. Does NOT use the global prisma client.
-// Returns the created sale's id.
+//
+// Returns:
+//   {
+//     saleId,
+//     items: [{ id, productId, branchProductId, baseQuantity }]
+//   }
+//
+// The items array gives verticals (e.g. pharmacy) exactly what they need to
+// link downstream rows (batch allocations, movements) to sale items without
+// a separate query-back.
 const createSaleTx = async (tx, userId, organizationId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -289,6 +304,8 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
     tx
   );
 
+  const createdItems = [];
+
   for (const p of preparedItems) {
     if (p.trackInventory) {
       const result = await tx.kxTillBranchProduct.updateMany({
@@ -304,7 +321,7 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
       }
     }
 
-    await saleDb.createSaleItem(
+    const createdItem = await saleDb.createSaleItem(
       {
         saleId: createdSale.id,
         productId: p.product.id,
@@ -324,6 +341,8 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
       },
       tx
     );
+
+    createdItems.push(createdItem);
   }
 
   for (const pay of payments) {
@@ -353,7 +372,15 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
     await saleDb.createSalePayment(paymentData, tx);
   }
 
-  return createdSale.id;
+  return {
+    saleId: createdSale.id,
+    items: createdItems.map((item) => ({
+      id: item.id,
+      productId: item.productId,
+      branchProductId: item.branchProductId,
+      baseQuantity: Number(item.baseQuantity),
+    })),
+  };
 };
 
 // ============================================================
