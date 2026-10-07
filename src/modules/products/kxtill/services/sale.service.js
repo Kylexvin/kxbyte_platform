@@ -360,7 +360,71 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
 // CREATE SALE (offline sync)
 // ============================================================
 
+// Public entry — opens the transaction, delegates to createOfflineSaleTx,
+// then performs post-commit side effects (audit + read-back).
+//
+// Idempotency: if clientSaleId already exists, the wrapper skips audit and
+// just returns the existing sale (matching prior behavior).
 const createOfflineSale = async (userId, organizationId, data) => {
+  const { clientSaleId } = data;
+
+  // Pre-flight idempotency check (outside tx, cheap read)
+  // Matches prior behavior: short-circuit before any validation.
+  if (clientSaleId) {
+    const existing = await saleDb.findSaleByClientId(clientSaleId);
+    if (existing) {
+      return saleDb.findSaleById(existing.id, organizationId);
+    }
+  }
+
+  const { saleId, wasCreated } = await prisma.$transaction(
+    (tx) => createOfflineSaleTx(tx, userId, organizationId, data),
+    { maxWait: 5000, timeout: 15000 }
+  );
+
+  const sale = await saleDb.findSaleById(saleId, organizationId);
+
+  // Only audit when the sale was actually created in this call.
+  // Duplicates (idempotent hits) skip audit — matching prior behavior.
+  if (wasCreated) {
+    const creditAmount = (sale.payments || [])
+      .filter((p) => p.method === 'CREDIT')
+      .reduce((s, p) => s + Number(p.amount), 0);
+
+    await audit.log({
+      organizationId,
+      userId,
+      action: 'KXTILL_SALE_CREATED_OFFLINE',
+      resource: 'sale',
+      resourceId: saleId,
+      metadata: {
+        clientSaleId: sale.clientSaleId,
+        reference: sale.reference,
+        total: Number(sale.totalAmount),
+        items: sale.items?.length ?? 0,
+        customerId: sale.customerId || null,
+        customerName: sale.customerName || null,
+        shiftId: sale.shiftId || null,
+        payments: (sale.payments || []).map((p) => ({
+          method: p.method,
+          amount: Number(p.amount),
+        })),
+        creditAmount,
+      },
+    });
+  }
+
+  return sale;
+};
+
+// Transaction-aware core — composable primitive for verticals.
+// MUST receive an active Prisma.TransactionClient as `tx`.
+// Does NOT open its own transaction. Does NOT use the global prisma client.
+//
+// Idempotency: performs a second (transaction-scoped) check on clientSaleId
+// to catch races. If the sale already exists, returns its id with
+// wasCreated=false. Otherwise creates and returns wasCreated=true.
+const createOfflineSaleTx = async (tx, userId, organizationId, data) => {
   const {
     clientSaleId,
     branchId,
@@ -368,13 +432,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     customerName,
     items,
   } = data;
-
-  if (clientSaleId) {
-    const existing = await saleDb.findSaleByClientId(clientSaleId);
-    if (existing) {
-      return saleDb.findSaleById(existing.id, organizationId);
-    }
-  }
 
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) throw new Error('Organization not found');
@@ -474,126 +531,103 @@ const createOfflineSale = async (userId, organizationId, data) => {
 
   const finalPaymentStatus = hasCredit ? 'CREDIT' : paymentStatus;
 
-  // ---- Idempotency guard #2 ----
+  // ---- Idempotency guard #2 (transaction-scoped) ----
   if (clientSaleId) {
-    const existing = await saleDb.findSaleByClientId(clientSaleId);
+    const existing = await tx.kxTillSale.findUnique({
+      where: { clientSaleId },
+      select: { id: true },
+    });
     if (existing) {
-      return saleDb.findSaleById(existing.id, organizationId);
+      return { saleId: existing.id, wasCreated: false };
     }
   }
 
-  // ---- Create sale + items + payments + ledger inside a transaction ----
-  const sale = await prisma.$transaction(
-    async (tx) => {
-      const createdSale = await saleDb.createSale(
+  // ---- Writes — all use `tx` ----
+  const createdSale = await saleDb.createSale(
+    {
+      organizationId,
+      userId,
+      branchId,
+      shiftId,
+      clientSaleId: clientSaleId || null,
+      customerId: customer?.id || null,
+      customerName: customer?.name || customerName || null,
+      reference,
+      subtotal,
+      taxAmount,
+      discount: 0,
+      totalAmount,
+      status: 'COMPLETED',
+      paymentStatus: finalPaymentStatus,
+    },
+    tx
+  );
+
+  for (const p of preparedItems) {
+    if (p.trackInventory) {
+      const result = await tx.kxTillBranchProduct.updateMany({
+        where: {
+          id: p.branchProduct.id,
+          stock: { gte: p.baseQuantity },
+        },
+        data: { stock: { decrement: p.baseQuantity } },
+      });
+
+      if (result.count === 0) {
+        throw new Error(`Insufficient stock for ${p.product.name}`);
+      }
+    }
+
+    await saleDb.createSaleItem(
+      {
+        saleId: createdSale.id,
+        productId: p.product.id,
+        unitId: p.unit.id,
+        branchProductId: p.branchProduct.id,
+        unitName: p.unit.name,
+        unitAbbrev: p.unit.abbreviation,
+        unitType: p.unit.unitType,
+        quantity: p.quantity,
+        conversionQty: p.conversionQty,
+        unitPrice: p.unitPrice,
+        baseQuantity: p.baseQuantity,
+        taxRate: Number(p.product.taxRate),
+        taxAmount: p.tax,
+        discount: 0,
+        total: p.total + p.tax,
+      },
+      tx
+    );
+  }
+
+  for (const pay of payments) {
+    const paymentData = {
+      saleId: createdSale.id,
+      method: pay.method,
+      amount: pay.amount,
+      reference: pay.reference,
+    };
+
+    if (pay.method === 'CREDIT') {
+      const chargeEntry = await creditService.recordCharge(
         {
           organizationId,
-          userId,
+          customerId: customer.id,
           branchId,
+          saleId: createdSale.id,
           shiftId,
-          clientSaleId: clientSaleId || null,
-          customerId: customer?.id || null,
-          customerName: customer?.name || customerName || null,
-          reference,
-          subtotal,
-          taxAmount,
-          discount: 0,
-          totalAmount,
-          status: 'COMPLETED',
-          paymentStatus: finalPaymentStatus,
+          amount: pay.amount,
+          createdById: userId,
         },
         tx
       );
+      paymentData.creditLedgerId = chargeEntry.id;
+    }
 
-      for (const p of preparedItems) {
-        if (p.trackInventory) {
-          const result = await tx.kxTillBranchProduct.updateMany({
-            where: {
-              id: p.branchProduct.id,
-              stock: { gte: p.baseQuantity },
-            },
-            data: { stock: { decrement: p.baseQuantity } },
-          });
+    await saleDb.createSalePayment(paymentData, tx);
+  }
 
-          if (result.count === 0) {
-            throw new Error(`Insufficient stock for ${p.product.name}`);
-          }
-        }
-
-        await saleDb.createSaleItem(
-          {
-            saleId: createdSale.id,
-            productId: p.product.id,
-            unitId: p.unit.id,
-            branchProductId: p.branchProduct.id,
-            unitName: p.unit.name,
-            unitAbbrev: p.unit.abbreviation,
-            unitType: p.unit.unitType,
-            quantity: p.quantity,
-            conversionQty: p.conversionQty,
-            unitPrice: p.unitPrice,
-            baseQuantity: p.baseQuantity,
-            taxRate: Number(p.product.taxRate),
-            taxAmount: p.tax,
-            discount: 0,
-            total: p.total + p.tax,
-          },
-          tx
-        );
-      }
-
-      for (const pay of payments) {
-        const paymentData = {
-          saleId: createdSale.id,
-          method: pay.method,
-          amount: pay.amount,
-          reference: pay.reference,
-        };
-
-        if (pay.method === 'CREDIT') {
-          const chargeEntry = await creditService.recordCharge(
-            {
-              organizationId,
-              customerId: customer.id,
-              branchId,
-              saleId: createdSale.id,
-              shiftId,
-              amount: pay.amount,
-              createdById: userId,
-            },
-            tx
-          );
-          paymentData.creditLedgerId = chargeEntry.id;
-        }
-
-        await saleDb.createSalePayment(paymentData, tx);
-      }
-
-      return createdSale;
-    },
-    { maxWait: 5000, timeout: 15000 }
-  );
-
-  await audit.log({
-    organizationId,
-    userId,
-    action: 'KXTILL_SALE_CREATED_OFFLINE',
-    resource: 'sale',
-    resourceId: sale.id,
-    metadata: {
-      clientSaleId,
-      reference,
-      total: totalAmount,
-      items: preparedItems.length,
-      customerId: customer?.id || null,
-      customerName: customer?.name || customerName || null,
-      shiftId,
-      payments: payments.map((p) => ({ method: p.method, amount: p.amount })),
-      creditAmount: creditTotal || 0,
-    },
-  });
-
-  return saleDb.findSaleById(sale.id, organizationId);
+  return { saleId: createdSale.id, wasCreated: true };
 };
 
 // ============================================================
@@ -1039,5 +1073,6 @@ export default {
   getSale,
   refundSale,
   createOfflineSale,
+  createOfflineSaleTx, 
   getSaleRefundableState,
 };
