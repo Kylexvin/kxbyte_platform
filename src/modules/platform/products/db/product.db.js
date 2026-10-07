@@ -47,6 +47,10 @@ const findOrganizationProducts = async (organizationId) => {
     },
     include: {
       product: true,
+      instances: {
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, vertical: true, name: true, isActive: true },
+      },
     },
   });
 };

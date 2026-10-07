@@ -143,6 +143,12 @@ const getOrganizationProducts = async (organizationId, userId) => {
     productLogoUrl: op.product.logoUrl,
     activatedAt: op.activatedAt,
     isActive: op.isActive,
+    instances: (op.instances || []).map((i) => ({
+      id: i.id,
+      vertical: i.vertical,
+      name: i.name,
+      isActive: i.isActive,
+    })),
   }));
 };
 
@@ -166,6 +172,19 @@ const activateProduct = async (organizationId, userId, productKey, vertical = 'r
   // Helper: build the enriched response
   const buildResponse = async () => {
     const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
+
+    // Fetch instances for this activation (may be empty if legacy org not yet backfilled)
+    let instances = [];
+    if (existing) {
+      const rows = await productDb.findInstancesByOrganizationProduct(existing.id);
+      instances = rows.map((i) => ({
+        id: i.id,
+        vertical: i.vertical,
+        name: i.name,
+        isActive: i.isActive,
+      }));
+    }
+
     return {
       organizationId,
       productKey: product.key,
@@ -189,11 +208,47 @@ const activateProduct = async (organizationId, userId, productKey, vertical = 'r
             )
           )
         : null,
+      instances,
     };
   };
 
   // Already active — return for any user
+  // Already active — return for any user, but allow adding a new vertical instance
   if (existing && existing.isActive) {
+    const instances = await productDb.findInstancesByOrganizationProduct(existing.id);
+    const hasVertical = instances.some((i) => i.vertical === vertical);
+
+    if (!hasVertical) {
+      const instanceName = `${organization.name} ${vertical.charAt(0).toUpperCase() + vertical.slice(1)}`;
+      const instance = await productDb.createProductInstance({
+        organizationProductId: existing.id,
+        vertical,
+        name: instanceName,
+        isActive: true,
+      });
+      console.log(`[products] Added ${vertical} instance to existing activation: ${instance.id}`);
+
+      if (vertical === 'pharmacy') {
+        await productDb.createPharmacyConfig({
+          productInstanceId: instance.id,
+          isEnabled: true,
+          expiryWarningDays: 90,
+          blockExpiredSales: true,
+          requireBatchOnSale: true,
+        });
+        console.log(`[products] Created pharmacy config for instance ${instance.id}`);
+      }
+
+      await audit.log({
+        organizationId: organization.id,
+        userId,
+        action: 'PRODUCT_INSTANCE_ADDED',
+        resource: 'product_instance',
+        resourceId: instance.id,
+        metadata: { productKey, vertical },
+      });
+    }
+
     return await buildResponse();
   }
 
