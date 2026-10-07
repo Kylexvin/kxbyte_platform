@@ -112,7 +112,49 @@ const resolvePaymentStatus = (payments, totalAmount) => {
 // CREATE SALE (online)
 // ============================================================
 
+// Public entry point — opens the transaction, delegates to createSaleTx,
+// then performs post-commit side effects (audit + read-back).
 const createSale = async (userId, organizationId, data) => {
+  const saleId = await prisma.$transaction(
+    (tx) => createSaleTx(tx, userId, organizationId, data),
+    { maxWait: 5000, timeout: 15000 }
+  );
+
+  const sale = await saleDb.findSaleById(saleId, organizationId);
+
+  const creditAmount = (sale.payments || [])
+    .filter((p) => p.method === 'CREDIT')
+    .reduce((s, p) => s + Number(p.amount), 0);
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'KXTILL_SALE_CREATED',
+    resource: 'sale',
+    resourceId: saleId,
+    metadata: {
+      total: Number(sale.totalAmount),
+      items: sale.items?.length ?? 0,
+      reference: sale.reference,
+      customerId: sale.customerId || null,
+      customerName: sale.customerName || 'Walk-in',
+      shiftId: sale.shiftId || null,
+      payments: (sale.payments || []).map((p) => ({
+        method: p.method,
+        amount: Number(p.amount),
+      })),
+      creditAmount,
+    },
+  });
+
+  return sale;
+};
+
+// Transaction-aware core — composable primitive for verticals.
+// MUST receive an active Prisma.TransactionClient as `tx`.
+// Does NOT open its own transaction. Does NOT use the global prisma client.
+// Returns the created sale's id.
+const createSaleTx = async (tx, userId, organizationId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
@@ -162,7 +204,7 @@ const createSale = async (userId, organizationId, data) => {
     const baseQuantity = quantity * conversionQty;
     const unitPrice = Number(unit.price || product.price);
 
-    const branchProduct = await prisma.kxTillBranchProduct.findFirst({
+    const branchProduct = await tx.kxTillBranchProduct.findFirst({
       where: {
         productId: product.id,
         branchId: data.branchId,
@@ -225,119 +267,93 @@ const createSale = async (userId, organizationId, data) => {
     await creditService.checkCreditLimit(customer.id, organizationId, creditTotal);
   }
 
-  // Determine final paymentStatus: CREDIT overrides PAID when credit is present
   const finalPaymentStatus = hasCredit ? 'CREDIT' : paymentStatus;
 
-  // ---- Single transaction: sale + items + stock + payments + ledger ----
-  const sale = await prisma.$transaction(
-    async (tx) => {
-      const createdSale = await saleDb.createSale(
+  // ---- Writes — all use `tx` ----
+  const createdSale = await saleDb.createSale(
+    {
+      organizationId,
+      userId,
+      reference,
+      customerId: customer?.id || null,
+      customerName: customer?.name || data.customerName || 'Walk-in',
+      branchId: data.branchId,
+      shiftId,
+      subtotal,
+      taxAmount,
+      discount: 0,
+      totalAmount,
+      status: 'COMPLETED',
+      paymentStatus: finalPaymentStatus,
+    },
+    tx
+  );
+
+  for (const p of preparedItems) {
+    if (p.trackInventory) {
+      const result = await tx.kxTillBranchProduct.updateMany({
+        where: {
+          id: p.branchProduct.id,
+          stock: { gte: p.baseQuantity },
+        },
+        data: { stock: { decrement: p.baseQuantity } },
+      });
+
+      if (result.count === 0) {
+        throw new Error(`Insufficient stock for ${p.product.name}`);
+      }
+    }
+
+    await saleDb.createSaleItem(
+      {
+        saleId: createdSale.id,
+        productId: p.product.id,
+        unitId: p.unit.id,
+        branchProductId: p.branchProduct.id,
+        unitName: p.unit.name,
+        unitAbbrev: p.unit.abbreviation,
+        unitType: p.unit.unitType,
+        quantity: p.quantity,
+        conversionQty: p.conversionQty,
+        unitPrice: p.unitPrice,
+        baseQuantity: p.baseQuantity,
+        taxRate: Number(p.product.taxRate),
+        taxAmount: p.tax,
+        discount: 0,
+        total: p.total + p.tax,
+      },
+      tx
+    );
+  }
+
+  for (const pay of payments) {
+    const paymentData = {
+      saleId: createdSale.id,
+      method: pay.method,
+      amount: pay.amount,
+      reference: pay.reference,
+    };
+
+    if (pay.method === 'CREDIT') {
+      const chargeEntry = await creditService.recordCharge(
         {
           organizationId,
-          userId,
-          reference,
-          customerId: customer?.id || null,
-          customerName: customer?.name || data.customerName || 'Walk-in',
+          customerId: customer.id,
           branchId: data.branchId,
+          saleId: createdSale.id,
           shiftId,
-          subtotal,
-          taxAmount,
-          discount: 0,
-          totalAmount,
-          status: 'COMPLETED',
-          paymentStatus: finalPaymentStatus,
+          amount: pay.amount,
+          createdById: userId,
         },
         tx
       );
+      paymentData.creditLedgerId = chargeEntry.id;
+    }
 
-      for (const p of preparedItems) {
-        if (p.trackInventory) {
-          const result = await tx.kxTillBranchProduct.updateMany({
-            where: {
-              id: p.branchProduct.id,
-              stock: { gte: p.baseQuantity },
-            },
-            data: { stock: { decrement: p.baseQuantity } },
-          });
+    await saleDb.createSalePayment(paymentData, tx);
+  }
 
-          if (result.count === 0) {
-            throw new Error(`Insufficient stock for ${p.product.name}`);
-          }
-        }
-
-        await saleDb.createSaleItem(
-          {
-            saleId: createdSale.id,
-            productId: p.product.id,
-            unitId: p.unit.id,
-            branchProductId: p.branchProduct.id,
-            unitName: p.unit.name,
-            unitAbbrev: p.unit.abbreviation,
-            unitType: p.unit.unitType,
-            quantity: p.quantity,
-            conversionQty: p.conversionQty,
-            unitPrice: p.unitPrice,
-            baseQuantity: p.baseQuantity,
-            taxRate: Number(p.product.taxRate),
-            taxAmount: p.tax,
-            discount: 0,
-            total: p.total + p.tax,
-          },
-          tx
-        );
-      }
-
-      for (const pay of payments) {
-        const paymentData = {
-          saleId: createdSale.id,
-          method: pay.method,
-          amount: pay.amount,
-          reference: pay.reference,
-        };
-
-        if (pay.method === 'CREDIT') {
-          const chargeEntry = await creditService.recordCharge(
-            {
-              organizationId,
-              customerId: customer.id,
-              branchId: data.branchId,
-              saleId: createdSale.id,
-              shiftId,
-              amount: pay.amount,
-              createdById: userId,
-            },
-            tx
-          );
-          paymentData.creditLedgerId = chargeEntry.id;
-        }
-
-        await saleDb.createSalePayment(paymentData, tx);
-      }
-
-      return createdSale;
-    },
-    { maxWait: 5000, timeout: 15000 }
-  );
-
-  await audit.log({
-    organizationId,
-    userId,
-    action: 'KXTILL_SALE_CREATED',
-    resource: 'sale',
-    resourceId: sale.id,
-    metadata: {
-      total: totalAmount,
-      items: preparedItems.length,
-      reference,
-      customerId: customer?.id || null,
-      customerName: customer?.name || 'Walk-in',
-      shiftId,
-      payments: payments.map((p) => ({ method: p.method, amount: p.amount })),
-      creditAmount: creditTotal || 0,
-    },
-  });
-
-  return saleDb.findSaleById(sale.id, organizationId);
+  return createdSale.id;
 };
 
 // ============================================================
@@ -1018,6 +1034,7 @@ const refundSale = async (organizationId, userId, saleId, payload = {}) => {
 
 export default {
   createSale,
+  createSaleTx,
   getSales,
   getSale,
   refundSale,
