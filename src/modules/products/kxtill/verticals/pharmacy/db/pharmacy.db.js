@@ -130,10 +130,127 @@ const createMovementTx = async (tx, data) => {
   return tx.kxTillPharmacyStockMovement.create({ data });
 };
 
+// ============================================================
+// BATCH READS (list, expiring, per-product with FEFO sort)
+// ============================================================
+
+// List batches for an organization, optionally filtered by branch.
+// Returns each batch with its per-branch stock (which may be empty if
+// the batch has no stock at the requested branch).
+const listBatches = async ({ organizationId, branchId, take = 100, skip = 0 }) => {
+  const where = {
+    product: { organizationId },
+    ...(branchId && {
+      stocks: { some: { branchProduct: { branchId } } },
+    }),
+  };
+
+  return prisma.kxTillPharmacyBatch.findMany({
+    where,
+    orderBy: { expiryDate: 'asc' },
+    take,
+    skip,
+    include: {
+      product: { select: { id: true, name: true, sku: true } },
+      stocks: branchId
+        ? {
+            where: { branchProduct: { branchId } },
+            include: {
+              branchProduct: {
+                select: { id: true, branchId: true, stock: true },
+              },
+            },
+          }
+        : {
+            include: {
+              branchProduct: {
+                select: { id: true, branchId: true, stock: true },
+              },
+            },
+          },
+    },
+  });
+};
+
+// Batches expiring within `days` from now, for an organization.
+// Optionally filter by branch. Only includes batches with stock.
+const listExpiringBatches = async ({ organizationId, branchId, days = 90 }) => {
+  const now = new Date();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() + days);
+
+  return prisma.kxTillPharmacyBatch.findMany({
+    where: {
+      product: { organizationId },
+      expiryDate: { gte: now, lte: cutoff },
+      stocks: {
+        some: {
+          quantityOnHand: { gt: 0 },
+          status: 'AVAILABLE',
+          ...(branchId && { branchProduct: { branchId } }),
+        },
+      },
+    },
+    orderBy: { expiryDate: 'asc' },
+    include: {
+      product: { select: { id: true, name: true, sku: true } },
+      stocks: {
+        where: {
+          quantityOnHand: { gt: 0 },
+          status: 'AVAILABLE',
+          ...(branchId && { branchProduct: { branchId } }),
+        },
+        include: {
+          branchProduct: {
+            select: { id: true, branchId: true, stock: true },
+          },
+        },
+      },
+    },
+  });
+};
+
+// Batches for a single product, FEFO-ordered (earliest expiry first).
+// Optionally filtered by branch. Only includes batches with stock > 0.
+const listBatchesForProduct = async ({ productId, branchId }) => {
+  return prisma.kxTillPharmacyBatch.findMany({
+    where: {
+      productId,
+      ...(branchId && {
+        stocks: {
+          some: {
+            quantityOnHand: { gt: 0 },
+            status: 'AVAILABLE',
+            branchProduct: { branchId },
+          },
+        },
+      }),
+    },
+    orderBy: { expiryDate: 'asc' },     // ← FEFO order
+    include: {
+      stocks: {
+        where: {
+          ...(branchId && { branchProduct: { branchId } }),
+          quantityOnHand: { gt: 0 },
+        },
+        include: {
+          branchProduct: {
+            select: { id: true, branchId: true, stock: true },
+          },
+        },
+      },
+    },
+  });
+};
+
 export default {
   // Batches
   findBatch,
   createBatch,
+  listBatches,
+  listExpiringBatches,
+  listBatchesForProduct,
+
   findBatchById,
 
   // Batch stock

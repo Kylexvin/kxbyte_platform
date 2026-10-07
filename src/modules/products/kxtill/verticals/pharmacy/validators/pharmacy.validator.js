@@ -105,6 +105,65 @@ const validateReceiveBatch = (data) => {
   return { valid: errors.length === 0, errors };
 };
 
+/**
+ * Validate query params for GET /pharmacy/batches/expiring
+ * Query: ?days=90&branchId=<uuid>
+ */
+const validateExpiringQuery = (query) => {
+  const errors = [];
+  const { days, branchId } = query || {};
+
+  if (days !== undefined) {
+    const n = Number(days);
+    if (!Number.isFinite(n) || n < 1) {
+      errors.push('days must be a positive number');
+    } else if (n > 3650) {
+      errors.push('days must be 3650 or fewer (10 years)');
+    }
+  }
+
+  if (branchId !== undefined && branchId !== '') {
+    if (!isValidUuid(branchId)) {
+      errors.push('branchId must be a valid UUID');
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+};
+
+/**
+ * Validate query params for GET /pharmacy/batches
+ * Query: ?branchId=<uuid>&take=<n>&skip=<n>
+ */
+const validateListQuery = (query) => {
+  const errors = [];
+  const { branchId, take, skip } = query || {};
+
+  if (branchId !== undefined && branchId !== '') {
+    if (!isValidUuid(branchId)) {
+      errors.push('branchId must be a valid UUID');
+    }
+  }
+
+  if (take !== undefined && take !== '') {
+    const n = Number(take);
+    if (!Number.isInteger(n) || n < 1 || n > 500) {
+      errors.push('take must be an integer between 1 and 500');
+    }
+  }
+
+  if (skip !== undefined && skip !== '') {
+    const n = Number(skip);
+    if (!Number.isInteger(n) || n < 0) {
+      errors.push('skip must be a non-negative integer');
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+};
+
 export default {
   validateReceiveBatch,
+  validateExpiringQuery,
+  validateListQuery,
 };

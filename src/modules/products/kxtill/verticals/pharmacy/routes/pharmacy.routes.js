@@ -9,7 +9,20 @@ import pharmacyController from '../controllers/pharmacy.controller.js';
 
 const router = express.Router({ mergeParams: true });
 
-// ─── Batch receiving ───
+// ============================================================
+// BATCH RECEIVING
+// ============================================================
 router.post('/batches/receive', pharmacyController.receiveBatch);
+
+// ============================================================
+// BATCH READS
+// ============================================================
+// NOTE: static paths must be declared BEFORE dynamic paths.
+// '/batches/expiring' before any '/batches/:id' (future).
+router.get('/batches/expiring', pharmacyController.listExpiringBatches);
+router.get('/batches', pharmacyController.listBatches);
+
+// Per-product batches (FEFO-ordered)
+router.get('/products/:productId/batches', pharmacyController.listProductBatches);
 
 export default router;

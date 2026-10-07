@@ -4,7 +4,9 @@
 // request shape, calls the service, maps errors to HTTP status codes.
 
 import receivingService from '../services/receiving.service.js';
+import batchesService from '../services/batches.service.js';
 import pharmacyValidator from '../validators/pharmacy.validator.js';
+
 
 /**
  * POST /pharmacy/batches/receive
@@ -94,6 +96,98 @@ const receiveBatch = async (req, res) => {
   }
 };
 
+// ============================================================
+// BATCH READS
+// ============================================================
+
+/**
+ * GET /pharmacy/batches
+ * List batches for an org (optionally filtered by branch).
+ */
+const listBatches = async (req, res) => {
+  const validation = pharmacyValidator.validateListQuery(req.query);
+  if (!validation.valid) {
+    return res.status(400).json({ errors: validation.errors });
+  }
+
+  const { organizationId } = req.params;
+  const { branchId, take, skip } = req.query;
+
+  try {
+    const result = await batchesService.listBatches({
+      organizationId,
+      branchId: branchId || null,
+      take: take ? Number(take) : 100,
+      skip: skip ? Number(skip) : 0,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('List batches error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+/**
+ * GET /pharmacy/batches/expiring?days=90&branchId=<uuid>
+ * Batches expiring within N days.
+ */
+const listExpiringBatches = async (req, res) => {
+  const validation = pharmacyValidator.validateExpiringQuery(req.query);
+  if (!validation.valid) {
+    return res.status(400).json({ errors: validation.errors });
+  }
+
+  const { organizationId } = req.params;
+  const { days, branchId } = req.query;
+
+  try {
+    const result = await batchesService.listExpiring({
+      organizationId,
+      branchId: branchId || null,
+      days: days ? Number(days) : 90,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'days must be a positive number') {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('List expiring batches error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+/**
+ * GET /pharmacy/products/:productId/batches?branchId=<uuid>
+ * Batches for a single product, FEFO-ordered.
+ */
+const listProductBatches = async (req, res) => {
+  const validation = pharmacyValidator.validateListQuery(req.query);
+  if (!validation.valid) {
+    return res.status(400).json({ errors: validation.errors });
+  }
+
+  const { organizationId, productId } = req.params;
+  const { branchId } = req.query;
+
+  try {
+    const result = await batchesService.listForProduct({
+      organizationId,
+      productId,
+      branchId: branchId || null,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'Product not found in this organization') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('List product batches error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   receiveBatch,
+  listBatches,
+  listExpiringBatches,
+  listProductBatches,
 };
