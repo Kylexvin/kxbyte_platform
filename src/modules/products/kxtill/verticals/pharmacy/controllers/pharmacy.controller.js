@@ -6,6 +6,8 @@
 import receivingService from '../services/receiving.service.js';
 import batchesService from '../services/batches.service.js';
 import pharmacyValidator from '../validators/pharmacy.validator.js';
+import pharmacySaleService from '../services/sales/createSale.js';
+import saleService from '../../../services/sale.service.js';
 
 
 /**
@@ -185,9 +187,79 @@ const listProductBatches = async (req, res) => {
   }
 };
 
+// ============================================================
+// PHARMACY SALES
+// ============================================================
+
+/**
+ * POST /pharmacy/sales
+ *
+ * Creates a pharmacy sale. Same body shape as Core's POST /kxtill/sales.
+ * The difference: pharmacy runs FEFO behind the scenes — the sale consumes
+ * stock from the earliest-expiring batches first, all in one transaction.
+ */
+const createPharmacySale = async (req, res) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { organizationId } = req.params;
+
+  try {
+    const saleId = await pharmacySaleService.createSale({
+      userId,
+      organizationId,
+      data: req.body,
+    });
+
+    // Read-back the sale for the response (same shape as Core)
+    const sale = await saleService.getSale(organizationId, userId, saleId);
+
+    return res.status(201).json({ sale });
+  } catch (error) {
+    // Map common errors to HTTP status
+    const msg = error.message || '';
+
+    if (msg.includes('Insufficient stock')) {
+      return res.status(400).json({
+        error: msg,
+        code: 'INSUFFICIENT_STOCK',
+      });
+    }
+    if (
+      msg === 'Organization not found' ||
+      msg === 'Product not found' ||
+      msg.includes('not found')
+    ) {
+      return res.status(404).json({ error: msg });
+    }
+    if (
+      msg.includes('permission') ||
+      msg.includes('do not have access')
+    ) {
+      return res.status(403).json({ error: msg });
+    }
+    if (
+      msg === 'Shift is required' ||
+      msg.includes('Credit') ||
+      msg.includes('Payments') ||
+      msg.includes('payment') ||
+      msg.includes('not available at this branch') ||
+      msg.includes('required')
+    ) {
+      return res.status(400).json({ error: msg });
+    }
+
+    console.error('Create pharmacy sale error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   receiveBatch,
   listBatches,
   listExpiringBatches,
+  createPharmacySale,
   listProductBatches,
 };

@@ -25,4 +25,10 @@ router.get('/batches', pharmacyController.listBatches);
 // Per-product batches (FEFO-ordered)
 router.get('/products/:productId/batches', pharmacyController.listProductBatches);
 
+// ============================================================
+// SALES
+// ============================================================
+router.post('/sales', pharmacyController.createPharmacySale);
+
+
 export default router;

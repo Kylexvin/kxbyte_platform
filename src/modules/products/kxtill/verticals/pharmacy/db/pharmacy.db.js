@@ -243,6 +243,31 @@ const listBatchesForProduct = async ({ productId, branchId }) => {
   });
 };
 
+// ============================================================
+// SALE BATCH ALLOCATIONS
+// ============================================================
+
+// Link a sale item to a batch that supplied it.
+// Idempotent-safe: caller is inside the sale transaction, so a duplicate
+// would violate the schema (no unique constraint today — but this should
+// never be called twice for the same (saleItemId, batchId) pair in practice).
+const createSaleBatchAllocationTx = async (tx, data) => {
+  return tx.kxTillPharmacySaleBatchAllocation.create({ data });
+};
+
+// ============================================================
+// BATCH STOCK — ATOMIC DECREMENT
+// ============================================================
+
+// Decrement batch stock atomically. Uses `decrement` to avoid read-modify-write
+// races. Caller must have already locked the row via FEFO's FOR UPDATE.
+const decrementBatchStockTx = async (tx, batchStockId, quantity) => {
+  return tx.kxTillPharmacyBatchStock.update({
+    where: { id: batchStockId },
+    data: { quantityOnHand: { decrement: quantity } },
+  });
+};
+
 export default {
   // Batches
   findBatch,
@@ -265,4 +290,8 @@ export default {
   upsertBatchStockTx,
   incrementBranchProductStockTx,
   createMovementTx,
+
+  //sale operations
+  createSaleBatchAllocationTx,
+  decrementBatchStockTx,
 };
