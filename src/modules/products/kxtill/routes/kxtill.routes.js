@@ -23,6 +23,7 @@ import subscriptionMiddleware from '../../../platform/subscriptions/middleware/s
 import pharmacyVertical from '../verticals/pharmacy/index.js';
 
 
+
 const router = express.Router({ mergeParams: true });
 
 router.use(authMiddleware.authenticate);
@@ -57,7 +58,12 @@ router.patch('/branches/:branchId/products/:productId', guard, productController
 // BRANCH PRODUCT ROUTES
 // ============================================================
 router.get('/branches/:branchId/products', guard, productController.getBranchProducts);
-router.patch('/branches/:branchId/products/:productId/stock', guard, productController.updateBranchProductStock);
+router.patch(
+  '/branches/:branchId/products/:productId/stock',
+  guard,
+  pharmacyVertical.middleware.blockDirectStockEdit,
+  productController.updateBranchProductStock
+);
 router.delete('/branches/:branchId/products/:productId', guard, productController.removeBranchProduct);
 router.patch('/branches/:branchId/products/:productId', guard, productController.updateBranchProduct);
 

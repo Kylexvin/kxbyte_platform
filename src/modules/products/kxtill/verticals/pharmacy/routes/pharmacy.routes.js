@@ -7,6 +7,7 @@
 import express from 'express';
 import pharmacyController from '../controllers/pharmacy.controller.js';
 
+
 const router = express.Router({ mergeParams: true });
 
 // ============================================================

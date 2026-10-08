@@ -110,7 +110,8 @@ const createProduct = async (userId, organizationId, data) => {
         productId: product.id,
         branchId: branch.id,
         displayName: data.name,
-        stock: data.stock || 0,
+        // Pharmacy products start at 0 — stock enters via batch receiving only.
+        stock: data.pharmacy ? 0 : (data.stock || 0),
         minStock: data.minStock || 0,
         isAvailable: true,
       },
