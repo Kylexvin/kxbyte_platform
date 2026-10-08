@@ -773,6 +773,72 @@ const getBranchProductsForSync = async (organizationId, branchId, since, limit =
     updatedAt: item.updatedAt,
   }));
 
+  // ─────────────────────────────────────────────────────────
+  // PHARMACY ENRICHMENT (optional — only when instance exists)
+  //
+  // If the org has an active pharmacy instance, attach a `batches`
+  // array to each branch product so offline terminals can run FEFO
+  // locally. Sorted by expiry ASC (FEFO order). Only batches with
+  // quantity > 0 and status = AVAILABLE.
+  //
+  // Retail orgs: no `batches` key added — response is byte-for-byte
+  // identical to before.
+  // ─────────────────────────────────────────────────────────
+  const hasPharmacy = await prisma.productInstance.findFirst({
+    where: {
+      vertical: 'pharmacy',
+      isActive: true,
+      organizationProduct: {
+        organizationId,
+        isActive: true,
+        product: { key: 'kxtill' },
+      },
+    },
+    select: { id: true },
+  });
+
+  if (hasPharmacy && formattedItems.length > 0) {
+    const branchProductIds = formattedItems.map((i) => i.id);
+
+    const batchStocks = await prisma.kxTillPharmacyBatchStock.findMany({
+      where: {
+        branchProductId: { in: branchProductIds },
+        quantityOnHand: { gt: 0 },
+        status: 'AVAILABLE',
+      },
+      include: {
+        batch: {
+          select: {
+            id: true,
+            batchNumber: true,
+            expiryDate: true,
+          },
+        },
+      },
+      orderBy: { batch: { expiryDate: 'asc' } },
+    });
+
+    // Group by branchProductId
+    const byBranchProduct = {};
+    for (const bs of batchStocks) {
+      if (!byBranchProduct[bs.branchProductId]) {
+        byBranchProduct[bs.branchProductId] = [];
+      }
+      byBranchProduct[bs.branchProductId].push({
+        batchId: bs.batch.id,
+        batchNumber: bs.batch.batchNumber,
+        expiryDate: bs.batch.expiryDate,
+        quantityOnHand: Number(bs.quantityOnHand),
+        status: bs.status,
+      });
+    }
+
+    // Attach to each formatted item
+    for (const item of formattedItems) {
+      item.batches = byBranchProduct[item.id] || [];
+    }
+  }
+
   return { items: formattedItems, total, limit, offset };
 };
 
