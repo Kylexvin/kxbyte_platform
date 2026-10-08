@@ -16,6 +16,7 @@ const findProductById = async (id, organizationId) => {
     include: {
       units: true,
       baseUnit: true,
+      pharmacyProduct: true,        
       branchProducts: {
         include: {
           branch: true,
@@ -49,6 +50,7 @@ const findProductsByOrganization = async (organizationId, filters = {}) => {
       include: {
         units: true,
         baseUnit: true,
+        pharmacyProduct: true,
         branchProducts: {
           include: {
             branch: true,

@@ -34,6 +34,25 @@ const createProduct = async (userId, organizationId, data) => {
     throw new Error('You do not have permission to create products');
   }
 
+  // ─── If pharmacy metadata is supplied, the org must have a pharmacy instance ───
+  if (data.pharmacy) {
+    const hasPharmacy = await prisma.productInstance.findFirst({
+      where: {
+        vertical: 'pharmacy',
+        isActive: true,
+        organizationProduct: {
+          organizationId,
+          isActive: true,
+          product: { key: 'kxtill' },
+        },
+      },
+      select: { id: true },
+    });
+    if (!hasPharmacy) {
+      throw new Error('Pharmacy metadata requires an active pharmacy instance');
+    }
+  }
+
   // Create product WITH cost
   const product = await productDb.createProduct({
     organizationId,
@@ -48,7 +67,6 @@ const createProduct = async (userId, organizationId, data) => {
 
   let baseUnitId = null;
 
-  // Create base unit if provided
   if (data.baseUnit) {
     const baseUnit = await productDb.createProductUnit({
       productId: product.id,
@@ -63,7 +81,6 @@ const createProduct = async (userId, organizationId, data) => {
     baseUnitId = baseUnit.id;
   }
 
-  // Create selling units
   if (data.units && data.units.length > 0) {
     for (const unit of data.units) {
       await productDb.createProductUnit({
@@ -79,12 +96,10 @@ const createProduct = async (userId, organizationId, data) => {
     }
   }
 
-  // Set base unit reference
   if (baseUnitId) {
     await productDb.updateProduct(product.id, organizationId, { baseUnitId });
   }
 
-  // Create branch products for all active branches
   const branches = await prisma.branch.findMany({
     where: { organizationId, isActive: true },
   });
@@ -102,6 +117,23 @@ const createProduct = async (userId, organizationId, data) => {
     });
   }
 
+  // ─── Attach pharmacy metadata (only when supplied) ───
+  if (data.pharmacy) {
+    await prisma.kxTillPharmacyProduct.create({
+      data: {
+        productId: product.id,
+        genericName: data.pharmacy.genericName ?? null,
+        brandName: data.pharmacy.brandName ?? null,
+        strength: data.pharmacy.strength ?? null,
+        dosageForm: data.pharmacy.dosageForm ?? null,
+        route: data.pharmacy.route ?? null,
+        prescriptionCategory: data.pharmacy.prescriptionCategory ?? null,
+        packSize: data.pharmacy.packSize ?? null,
+        storageConditions: data.pharmacy.storageConditions ?? null,
+      },
+    });
+  }
+
   const completeProduct = await productDb.findProductById(product.id, organizationId);
 
   await audit.log({
@@ -113,6 +145,7 @@ const createProduct = async (userId, organizationId, data) => {
     metadata: {
       name: product.name,
       sku: product.sku,
+      hasPharmacyMetadata: !!data.pharmacy,
     },
   });
 
@@ -153,7 +186,25 @@ const updateProduct = async (organizationId, userId, productId, data) => {
     throw new Error('You do not have permission to update products');
   }
 
-  // ✅ Only allow valid product fields
+  // ─── Pharmacy metadata: verify instance before touching it ───
+  if (data.pharmacy) {
+    const hasPharmacy = await prisma.productInstance.findFirst({
+      where: {
+        vertical: 'pharmacy',
+        isActive: true,
+        organizationProduct: {
+          organizationId,
+          isActive: true,
+          product: { key: 'kxtill' },
+        },
+      },
+      select: { id: true },
+    });
+    if (!hasPharmacy) {
+      throw new Error('Pharmacy metadata requires an active pharmacy instance');
+    }
+  }
+
   const allowedFields = ['name', 'sku', 'description', 'category', 'taxRate', 'cost', 'trackInventory', 'isActive'];
   const updateData = {};
 
@@ -163,25 +214,62 @@ const updateProduct = async (organizationId, userId, productId, data) => {
     }
   }
 
-  if (Object.keys(updateData).length === 0) {
+  const hasCoreChanges = Object.keys(updateData).length > 0;
+  const hasPharmacyChanges = !!data.pharmacy;
+
+  if (!hasCoreChanges && !hasPharmacyChanges) {
     throw new Error('No valid fields to update');
   }
 
-  const product = await productDb.updateProduct(productId, organizationId, updateData);
+  // ─── Update core product if any core fields changed ───
+  let product;
+  if (hasCoreChanges) {
+    product = await productDb.updateProduct(productId, organizationId, updateData);
+  } else {
+    // No core fields — just verify product exists
+    product = await productDb.findProductById(productId, organizationId);
+    if (!product) {
+      throw new Error('Product not found');
+    }
+  }
+
+  // ─── Upsert pharmacy metadata if supplied ───
+  if (hasPharmacyChanges) {
+    const pharmacyData = {
+      genericName: data.pharmacy.genericName,
+      brandName: data.pharmacy.brandName,
+      strength: data.pharmacy.strength,
+      dosageForm: data.pharmacy.dosageForm,
+      route: data.pharmacy.route,
+      prescriptionCategory: data.pharmacy.prescriptionCategory,
+      packSize: data.pharmacy.packSize,
+      storageConditions: data.pharmacy.storageConditions,
+    };
+    // Remove undefined keys so we don't overwrite existing values with undefined
+    Object.keys(pharmacyData).forEach((k) => pharmacyData[k] === undefined && delete pharmacyData[k]);
+
+    await prisma.kxTillPharmacyProduct.upsert({
+      where: { productId },
+      update: pharmacyData,
+      create: { productId, ...pharmacyData },
+    });
+  }
+
+  const completeProduct = await productDb.findProductById(productId, organizationId);
 
   await audit.log({
     organizationId,
     userId,
     action: 'KXTILL_PRODUCT_UPDATED',
     resource: 'product',
-    resourceId: product.id,
+    resourceId: completeProduct.id,
     metadata: {
-      name: product.name,
-      updatedFields: Object.keys(updateData),
+      name: completeProduct.name,
+      updatedFields: [...Object.keys(updateData), ...(hasPharmacyChanges ? ['pharmacy'] : [])],
     },
   });
 
-  return product;
+  return completeProduct;
 };
 
 const deleteProduct = async (organizationId, userId, productId) => {
