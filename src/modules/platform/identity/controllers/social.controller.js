@@ -6,10 +6,11 @@ import authDb from '../db/auth.db.js';
 import authCodeStore from '../utils/authCodeStore.js';
 import jwt from '../utils/jwt.js';
 
-const VALID_CLIENTS = ['kxtill', 'kxinvoice', 'kxcrm', 'kxsuite'];
+const VALID_CLIENTS = ['kxtill', 'kxtill-pharmacy', 'kxinvoice', 'kxcrm', 'kxsuite'];
 
 const ALLOWED_REDIRECTS = {
   kxtill: process.env.KXTILL_REDIRECT_URI || 'http://localhost:3000/kx/kxtill/oauth/callback',
+  'kxtill-pharmacy': process.env.KXTILL_PHARMACY_REDIRECT_URI || 'http://localhost:3000/kx/kxtill/oauth/callback',
   kxinvoice: process.env.KXINVOICE_REDIRECT_URI || 'http://localhost:3000/kx/kxinvoice/oauth/callback',
   kxcrm: process.env.KXCRM_REDIRECT_URI || 'http://localhost:3000/kx/kxcrm/oauth/callback',
   kxsuite: process.env.KXSUITE_REDIRECT_URI || 'http://localhost:3000/dashboard/oauth/callback',

@@ -39,6 +39,7 @@ const getOrganizationProducts = async (req, res) => {
 
 const activateProduct = async (req, res) => {
   const validation = productValidator.validateActivateProduct(req.body);
+  
   if (!validation.valid) {
     return res.status(400).json({ errors: validation.errors });
   }
@@ -51,6 +52,7 @@ const activateProduct = async (req, res) => {
 
     const { organizationId } = req.params;
     const { productKey, vertical } = req.body;
+    console.log('[activate] body:', req.body);
 
     const result = await productService.activateProduct(organizationId, userId, productKey, vertical);
     res.status(201).json(result);

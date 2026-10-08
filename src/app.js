@@ -89,6 +89,7 @@ const FRONTEND_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:3000';
 // Origins the OAuth login redirects to (Chrome enforces form-action on post-submit redirects)
 const CLIENT_ORIGINS = [
   process.env.KXTILL_REDIRECT_URI,
+  process.env.KXTILL_PHARMACY_REDIRECT_URI,
   process.env.KXINVOICE_REDIRECT_URI,
   process.env.KXCRM_REDIRECT_URI,
   process.env.KXSUITE_REDIRECT_URI,
