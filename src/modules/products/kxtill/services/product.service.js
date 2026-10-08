@@ -476,7 +476,18 @@ const getBranchProducts = async (organizationId, userId, branchId, filters = {})
     throw new Error('You do not have access to this organization');
   }
 
-  // Check if user has access to this branch
+  // Verify the branch actually belongs to this organization. This is the
+  // tenant boundary — without it, an owner with `hasAllBranches = true`
+  // could pass a foreign branchId and see another org's products.
+  const branch = await prisma.branch.findFirst({
+    where: { id: branchId, organizationId, isActive: true },
+    select: { id: true },
+  });
+  if (!branch) {
+    throw new Error('Branch not found');
+  }
+
+  // Check branch-level access for non-owner memberships.
   if (!membership.hasAllBranches) {
     const hasBranchAccess = await prisma.branchAssignment.findUnique({
       where: {
@@ -491,7 +502,7 @@ const getBranchProducts = async (organizationId, userId, branchId, filters = {})
     }
   }
 
-  return productDb.getBranchProducts(branchId, filters);
+  return productDb.getBranchProducts(branchId, organizationId, filters);
 };
 
 const updateBranchProductStock = async (organizationId, userId, branchId, productId, stockData) => {

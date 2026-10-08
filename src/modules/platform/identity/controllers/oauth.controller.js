@@ -867,7 +867,7 @@ const authorize = async (req, res) => {
 
 const productNames = {
   kxtill: 'KXTill',
-  'kxtill-pharmacy': 'KXTill Pharmacy',
+  'kxtill-pharmacy': 'KxTill Pharmacy',
   kxinvoice: 'KXInvoice',
   kxcrm: 'KXCRM',
   kxsuite: 'KXSuite'

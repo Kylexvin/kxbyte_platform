@@ -209,13 +209,16 @@ const getLowStockProducts = async (organizationId) => {
   }));
 };
 
-const getBranchProducts = async (branchId, filters = {}) => {
+const getBranchProducts = async (branchId, organizationId, filters = {}) => {
   const { limit = 50, offset = 0, search, category, includeUnavailable } = filters;
 
   // Build the product-level where clause. We iterate PRODUCTS (not branch
   // products) so a branch sees the global catalog even before it has a
   // branch_products row. Products with no row appear with stock 0.
-  const productWhere = { isActive: true };
+  //
+  // IMPORTANT: organizationId scoping is required. Without it, a caller
+  // passing a foreign branchId would see another tenant's products.
+  const productWhere = { isActive: true, organizationId };
   if (search) {
     productWhere.OR = [
       { name: { contains: search, mode: 'insensitive' } },
