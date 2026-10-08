@@ -395,7 +395,7 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
 const createOfflineSale = async (userId, organizationId, data) => {
   const { clientSaleId } = data;
 
-  // Pre-flight idempotency check (outside tx, cheap read)
+  // Pre-flight idempotency check (outside tx, cheap read).
   // Matches prior behavior: short-circuit before any validation.
   if (clientSaleId) {
     const existing = await saleDb.findSaleByClientId(clientSaleId);
@@ -451,6 +451,16 @@ const createOfflineSale = async (userId, organizationId, data) => {
 // Idempotency: performs a second (transaction-scoped) check on clientSaleId
 // to catch races. If the sale already exists, returns its id with
 // wasCreated=false. Otherwise creates and returns wasCreated=true.
+//
+// Returns:
+//   {
+//     saleId,
+//     wasCreated,
+//     items: [{ id, productId, branchProductId, baseQuantity }]
+//   }
+//
+// The items array gives verticals (e.g. pharmacy) exactly what they need to
+// link downstream rows (batch allocations, movements) to sale items.
 const createOfflineSaleTx = async (tx, userId, organizationId, data) => {
   const {
     clientSaleId,
@@ -565,7 +575,7 @@ const createOfflineSaleTx = async (tx, userId, organizationId, data) => {
       select: { id: true },
     });
     if (existing) {
-      return { saleId: existing.id, wasCreated: false };
+      return { saleId: existing.id, wasCreated: false, items: [] };
     }
   }
 
@@ -590,6 +600,8 @@ const createOfflineSaleTx = async (tx, userId, organizationId, data) => {
     tx
   );
 
+  const createdItems = [];
+
   for (const p of preparedItems) {
     if (p.trackInventory) {
       const result = await tx.kxTillBranchProduct.updateMany({
@@ -605,7 +617,7 @@ const createOfflineSaleTx = async (tx, userId, organizationId, data) => {
       }
     }
 
-    await saleDb.createSaleItem(
+    const createdItem = await saleDb.createSaleItem(
       {
         saleId: createdSale.id,
         productId: p.product.id,
@@ -625,6 +637,8 @@ const createOfflineSaleTx = async (tx, userId, organizationId, data) => {
       },
       tx
     );
+
+    createdItems.push(createdItem);
   }
 
   for (const pay of payments) {
@@ -654,7 +668,16 @@ const createOfflineSaleTx = async (tx, userId, organizationId, data) => {
     await saleDb.createSalePayment(paymentData, tx);
   }
 
-  return { saleId: createdSale.id, wasCreated: true };
+  return {
+    saleId: createdSale.id,
+    wasCreated: true,
+    items: createdItems.map((item) => ({
+      id: item.id,
+      productId: item.productId,
+      branchProductId: item.branchProductId,
+      baseQuantity: Number(item.baseQuantity),
+    })),
+  };
 };
 
 // ============================================================
