@@ -8,7 +8,7 @@ import batchesService from '../services/batches.service.js';
 import pharmacyValidator from '../validators/pharmacy.validator.js';
 import pharmacySaleService from '../services/sales/createSale.js';
 import saleService from '../../../services/sale.service.js';
-
+import pharmacyRefundService from '../services/sales/refundSale.js';
 
 /**
  * POST /pharmacy/batches/receive
@@ -256,10 +256,85 @@ const createPharmacySale = async (req, res) => {
   }
 };
 
+// ============================================================
+// PHARMACY REFUNDS
+// ============================================================
+
+/**
+ * POST /pharmacy/sales/:saleId/refund
+ *
+ * Refunds a pharmacy sale. Same body shape as Core's refund, plus
+ * `allocations` per item — which specify which batch the returned
+ * units came from.
+ *
+ * Example body:
+ * {
+ *   "items": [
+ *     {
+ *       "saleItemId": "...",
+ *       "quantity": 7,
+ *       "allocations": [
+ *         { "batchId": "...", "quantity": 7 }
+ *       ]
+ *     }
+ *   ],
+ *   "cash": 35,
+ *   "reason": "Customer return"
+ * }
+ */
+const createPharmacyRefund = async (req, res) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { organizationId, saleId } = req.params;
+
+  try {
+    const result = await pharmacyRefundService.refundSale({
+      organizationId,
+      userId,
+      saleId,
+      payload: req.body,
+    });
+
+    return res.status(201).json(result);
+  } catch (error) {
+    const msg = error.message || '';
+
+    if (msg === 'Sale not found') {
+      return res.status(404).json({ error: msg });
+    }
+    if (
+      msg.includes('do not have access') ||
+      msg.includes('permission')
+    ) {
+      return res.status(403).json({ error: msg });
+    }
+    if (
+      msg.includes('allocation') ||
+      msg.includes('batch') ||
+      msg.includes('exceeds') ||
+      msg.includes('Cannot refund') ||
+      msg.includes('must') ||
+      msg.includes('required') ||
+      msg.includes('positive') ||
+      msg.includes('greater than zero') ||
+      msg.includes('voided')
+    ) {
+      return res.status(400).json({ error: msg });
+    }
+
+    console.error('Create pharmacy refund error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   receiveBatch,
   listBatches,
   listExpiringBatches,
   createPharmacySale,
   listProductBatches,
+  createPharmacyRefund,
 };

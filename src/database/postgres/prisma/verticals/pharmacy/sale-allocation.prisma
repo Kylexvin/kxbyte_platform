@@ -17,6 +17,9 @@ model KxTillPharmacySaleBatchAllocation {
 
   quantity Decimal
   unitCost Decimal
+  
+  refundedQuantity Decimal @default(0)
+  refundAllocations KxTillPharmacyRefundAllocation[]
 
   createdAt DateTime @default(now())
 

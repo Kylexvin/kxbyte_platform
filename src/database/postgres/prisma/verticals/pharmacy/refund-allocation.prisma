@@ -1,0 +1,41 @@
+// src/database/postgres/prisma/verticals/pharmacy/refund-allocation.prisma
+//
+// ============================================================
+// KXTILL PHARMACY - REFUND → BATCH ALLOCATION
+//
+// Records which batch the customer physically returned for a
+// given refund. One row per (refund item × batch) reversal.
+//
+// The original sale allocation is the source of truth:
+//   sum(refundAllocations.quantity where saleAllocationId = X)
+//     ≤ X.quantity
+//
+// This is independent from KxTillPharmacySaleBatchAllocation
+// (outbound). This model records the inbound reversal.
+// ============================================================
+
+model KxTillPharmacyRefundAllocation {
+  id String @id @default(uuid())
+
+  refundItemId String
+  refundItem   KxTillSaleRefundItem @relation(fields: [refundItemId], references: [id], onDelete: Cascade)
+
+  saleAllocationId String
+  saleAllocation   KxTillPharmacySaleBatchAllocation @relation(fields: [saleAllocationId], references: [id], onDelete: Restrict)
+
+  batchId String
+  batch   KxTillPharmacyBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  batchStockId String
+  batchStock   KxTillPharmacyBatchStock @relation(fields: [batchStockId], references: [id], onDelete: Restrict)
+
+  quantity Decimal
+
+  createdAt DateTime @default(now())
+
+  @@index([refundItemId])
+  @@index([saleAllocationId])
+  @@index([batchId])
+  @@index([batchStockId])
+  @@map("kxtill_pharmacy_refund_allocations")
+}

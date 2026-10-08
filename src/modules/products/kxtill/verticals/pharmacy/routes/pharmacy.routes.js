@@ -31,5 +31,10 @@ router.get('/products/:productId/batches', pharmacyController.listProductBatches
 // ============================================================
 router.post('/sales', pharmacyController.createPharmacySale);
 
+// ============================================================
+// REFUNDS
+// ============================================================
+
+router.post('/sales/:saleId/refund', pharmacyController.createPharmacyRefund);
 
 export default router;

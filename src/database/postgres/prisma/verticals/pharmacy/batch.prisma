@@ -20,6 +20,8 @@ model KxTillPharmacyBatch {
   stocks          KxTillPharmacyBatchStock[]
   saleAllocations KxTillPharmacySaleBatchAllocation[]
   movements       KxTillPharmacyStockMovement[]
+  refundAllocations KxTillPharmacyRefundAllocation[]
+
 
   @@unique([productId, batchNumber, expiryDate])
   @@index([productId])
@@ -44,6 +46,7 @@ model KxTillPharmacyBatchStock {
 
   saleAllocations KxTillPharmacySaleBatchAllocation[]
   movements       KxTillPharmacyStockMovement[]
+  refundAllocations KxTillPharmacyRefundAllocation[]
 
   @@unique([batchId, branchProductId])
   @@index([branchProductId])

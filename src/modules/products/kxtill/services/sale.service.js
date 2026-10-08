@@ -822,7 +822,70 @@ const generateRefundReference = () => {
   return `REF-${timestamp}-${random}`;
 };
 
+// ============================================================
+// REFUND (partial + multi-method)
+// ============================================================
+
+// Public entry — opens the transaction, delegates to refundSaleTx,
+// then performs post-commit side effects (audit + read-back).
 const refundSale = async (organizationId, userId, saleId, payload = {}) => {
+  const coreResult = await prisma.$transaction(
+    (tx) => refundSaleTx(tx, organizationId, userId, saleId, payload),
+    { maxWait: 5000, timeout: 15000 }
+  );
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'KXTILL_SALE_REFUNDED',
+    resource: 'sale',
+    resourceId: saleId,
+    metadata: {
+      refundId: coreResult.refundId,
+      refundReference: coreResult.reference,
+      refundTotal: coreResult.refundTotal,
+      methods: coreResult.methods,
+      itemCount: coreResult.refundedItems.length,
+      branchId: coreResult.branchId,
+      shiftId: coreResult.shiftId,
+      fullyRefunded: coreResult.fullyRefunded,
+    },
+  });
+
+  const fullRefund = await refundDb.findRefundById(coreResult.refundId, organizationId);
+  const updatedSaleFull = await saleDb.findSaleById(saleId, organizationId);
+
+  return {
+    refund: fullRefund,
+    sale: updatedSaleFull,
+    ledgerAffected: coreResult.creditReversed > 0.01,
+    creditReversed: coreResult.creditReversed,
+    customerId: coreResult.creditReversed > 0.01 ? coreResult.customerId : null,
+  };
+};
+
+// Transaction-aware core — composable primitive for verticals.
+// MUST receive an active Prisma.TransactionClient as `tx`.
+// Does NOT open its own transaction. Does NOT use the global prisma client.
+//
+// Returns:
+//   {
+//     refundId,
+//     reference,
+//     saleId,
+//     branchId,
+//     shiftId,
+//     refundTotal,
+//     fullyRefunded,
+//     methods: { cash, mpesa, card, bank, credit },
+//     creditReversed,
+//     customerId,
+//     refundedItems: [ { saleItemId, quantity, baseQuantity, branchProductId } ]
+//   }
+//
+// The refundedItems array gives verticals (pharmacy) exactly what they need
+// to reverse downstream batch allocations.
+const refundSaleTx = async (tx, organizationId, userId, saleId, payload = {}) => {
   const {
     items: requestedItems,   // [{ saleItemId, quantity }]
     cash = 0,
@@ -846,7 +909,7 @@ const refundSale = async (organizationId, userId, saleId, payload = {}) => {
     throw new Error('You do not have permission to refund sales');
   }
 
-  const sale = await prisma.kxTillSale.findFirst({
+  const sale = await tx.kxTillSale.findFirst({
     where: { id: saleId, organizationId },
     include: {
       items: true,
@@ -880,7 +943,7 @@ const refundSale = async (organizationId, userId, saleId, payload = {}) => {
     throw new Error('At least one item is required for refund');
   }
 
-  const refundedQtyMap = await refundDb.sumRefundedQuantitiesBySale(saleId);
+  const refundedQtyMap = await refundDb.sumRefundedQuantitiesBySale(saleId, tx);
 
   const refundItems = [];
   let refundTotal = 0;
@@ -961,135 +1024,125 @@ const refundSale = async (organizationId, userId, saleId, payload = {}) => {
     );
   }
 
-  // ---- Map to storage buckets ----
-  // cashAmount = physical cash handed back
-  // creditAmount = deni reversal
-  // otherAmount = electronic refunds (M-PESA, card, bank combined)
   const otherAmt = Number((mpesaAmt + cardAmt + bankAmt).toFixed(2));
-
   const reference = generateRefundReference();
 
-  // ---- Transaction ----
-  const result = await prisma.$transaction(
-    async (tx) => {
-      const refund = await refundDb.createRefund(
-        {
-          reference,
-          organizationId,
-          saleId: sale.id,
-          branchId: sale.branchId,
-          shiftId: refundShiftId,
-          userId,
-          totalAmount: refundTotal,
-          cashAmount: cashAmt,
-          creditAmount: creditAmt,
-          otherAmount: otherAmt,
-          reason,
-          note,
-        },
-        tx
-      );
-
-      for (const ri of refundItems) {
-        await refundDb.createRefundItem(
-          {
-            refundId: refund.id,
-            saleItemId: ri.saleItemId,
-            quantity: ri.quantity,
-            unitPrice: ri.unitPrice,
-            total: ri.total,
-          },
-          tx
-        );
-      }
-
-      // Restore stock
-      for (const ri of refundItems) {
-        if (!ri.branchProductId) continue;
-        await tx.kxTillBranchProduct.update({
-          where: { id: ri.branchProductId },
-          data: { stock: { increment: ri.baseQuantity } },
-        });
-      }
-
-      // Update sale totals + status
-      const prevRefunded = Number(sale.refundedAmount);
-      const newRefundedAmount = Number((prevRefunded + refundTotal).toFixed(2));
-      const saleTotal = Number(sale.totalAmount);
-      const fullyRefunded = newRefundedAmount >= saleTotal - 0.01;
-
-      const updatedSale = await tx.kxTillSale.update({
-        where: { id: sale.id },
-        data: {
-          refundedAmount: newRefundedAmount,
-          status: fullyRefunded ? 'REFUNDED' : 'REFUNDED_PARTIAL',
-          // Legacy dual-write (last-refund snapshot)
-          refundedBy: userId,
-          refundedAt: new Date(),
-          refundShiftId: refundShiftId || sale.refundShiftId || null,
-        },
-      });
-
-      // Credit reversal (only if credit portion was refunded)
-      if (creditAmt > 0.01) {
-        const chargeEntries = await tx.customerCreditLedger.findMany({
-          where: { saleId: sale.id, type: 'CHARGE' },
-          orderBy: { createdAt: 'asc' },
-        });
-
-        if (chargeEntries.length === 0) {
-          throw new Error(
-            'Credit reversal requested but no credit charge exists for this sale'
-          );
-        }
-
-        await creditService.recordReversal(
-          {
-            organizationId,
-            customerId: sale.customerId,
-            saleId: sale.id,
-            chargeLedgerEntryId: chargeEntries[0].id,
-            amount: creditAmt,
-            note: `Refund ${reference}`,
-            createdById: userId,
-          },
-          tx
-        );
-      }
-
-      return { refund, sale: updatedSale };
-    },
-    { maxWait: 5000, timeout: 15000 }
-  );
-
-  await audit.log({
-    organizationId,
-    userId,
-    action: 'KXTILL_SALE_REFUNDED',
-    resource: 'sale',
-    resourceId: saleId,
-    metadata: {
-      refundId: result.refund.id,
-      refundReference: reference,
-      originalTotal: Number(sale.totalAmount),
-      refundTotal,
-      methods: { cash: cashAmt, mpesa: mpesaAmt, card: cardAmt, bank: bankAmt, credit: creditAmt },
-      itemCount: refundItems.length,
+  // ---- Writes — all use `tx` ----
+  const refund = await refundDb.createRefund(
+    {
+      reference,
+      organizationId,
+      saleId: sale.id,
       branchId: sale.branchId,
       shiftId: refundShiftId,
-      fullyRefunded: result.sale.status === 'REFUNDED',
+      userId,
+      totalAmount: refundTotal,
+      cashAmount: cashAmt,
+      creditAmount: creditAmt,
+      otherAmount: otherAmt,
+      reason,
+      note,
+    },
+    tx
+  );
+
+  const createdRefundItems = [];
+
+  for (const ri of refundItems) {
+    const createdItem = await refundDb.createRefundItem(
+      {
+        refundId: refund.id,
+        saleItemId: ri.saleItemId,
+        quantity: ri.quantity,
+        unitPrice: ri.unitPrice,
+        total: ri.total,
+      },
+      tx
+    );
+    createdRefundItems.push({
+      ...createdItem,
+      baseQuantity: ri.baseQuantity,
+      branchProductId: ri.branchProductId,
+    });
+  }
+
+  // Restore Core aggregate stock
+  for (const ri of refundItems) {
+    if (!ri.branchProductId) continue;
+    await tx.kxTillBranchProduct.update({
+      where: { id: ri.branchProductId },
+      data: { stock: { increment: ri.baseQuantity } },
+    });
+  }
+
+  // Update sale totals + status
+  const prevRefunded = Number(sale.refundedAmount);
+  const newRefundedAmount = Number((prevRefunded + refundTotal).toFixed(2));
+  const saleTotal = Number(sale.totalAmount);
+  const fullyRefunded = newRefundedAmount >= saleTotal - 0.01;
+
+  await tx.kxTillSale.update({
+    where: { id: sale.id },
+    data: {
+      refundedAmount: newRefundedAmount,
+      status: fullyRefunded ? 'REFUNDED' : 'REFUNDED_PARTIAL',
+      refundedBy: userId,
+      refundedAt: new Date(),
+      refundShiftId: refundShiftId || sale.refundShiftId || null,
     },
   });
 
-  const fullRefund = await refundDb.findRefundById(result.refund.id, organizationId);
-  const updatedSaleFull = await saleDb.findSaleById(sale.id, organizationId);
+  // Credit reversal (only if credit portion was refunded)
+  if (creditAmt > 0.01) {
+    const chargeEntries = await tx.customerCreditLedger.findMany({
+      where: { saleId: sale.id, type: 'CHARGE' },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (chargeEntries.length === 0) {
+      throw new Error(
+        'Credit reversal requested but no credit charge exists for this sale'
+      );
+    }
+
+    await creditService.recordReversal(
+      {
+        organizationId,
+        customerId: sale.customerId,
+        saleId: sale.id,
+        chargeLedgerEntryId: chargeEntries[0].id,
+        amount: creditAmt,
+        note: `Refund ${reference}`,
+        createdById: userId,
+      },
+      tx
+    );
+  }
 
   return {
-    refund: fullRefund,
-    sale: updatedSaleFull,
-    ledgerAffected: creditAmt > 0.01,
+    refundId: refund.id,
+    reference,
+    saleId: sale.id,
+    branchId: sale.branchId,
+    shiftId: refundShiftId,
+    refundTotal,
+    fullyRefunded,
+    methods: {
+      cash: cashAmt,
+      mpesa: mpesaAmt,
+      card: cardAmt,
+      bank: bankAmt,
+      credit: creditAmt,
+    },
     creditReversed: creditAmt,
-    customerId: creditAmt > 0.01 ? sale.customerId : null,
+    customerId: sale.customerId,
+    refundedItems: createdRefundItems.map((ri) => ({
+      refundItemId: ri.id,
+      saleItemId: ri.saleItemId,
+      quantity: Number(ri.quantity),
+      baseQuantity: ri.baseQuantity,
+      branchProductId: ri.branchProductId,
+    })),
   };
 };
 
@@ -1099,6 +1152,7 @@ export default {
   getSales,
   getSale,
   refundSale,
+  refundSaleTx,
   createOfflineSale,
   createOfflineSaleTx, 
   getSaleRefundableState,

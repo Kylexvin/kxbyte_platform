@@ -1030,6 +1030,9 @@ model KxTillSaleRefundItem {
 
   createdAt   DateTime @default(now())
 
+  // ═══ VERTICAL EXTENSIONS ═══
+  pharmacyRefundAllocations KxTillPharmacyRefundAllocation[]
+
   @@index([refundId])
   @@index([saleItemId])
   @@map("kxtill_sale_refund_items")

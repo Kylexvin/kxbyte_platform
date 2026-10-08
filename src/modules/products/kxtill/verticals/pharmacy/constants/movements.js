@@ -18,6 +18,7 @@ export const MOVEMENT_TYPES = Object.freeze({
   ADJUSTED: 'ADJUSTED',                       // manual stock count correction
   QUARANTINED: 'QUARANTINED',                 // held aside, not sellable
   RECALLED: 'RECALLED',                       // manufacturer recall
+  REFUNDED: 'REFUNDED',                       // refunded to customer (via sale refund)
 });
 
 export const MOVEMENT_TYPE_LIST = Object.freeze(Object.values(MOVEMENT_TYPES));
@@ -26,6 +27,7 @@ export const MOVEMENT_TYPE_LIST = Object.freeze(Object.values(MOVEMENT_TYPES));
 export const INBOUND_MOVEMENTS = Object.freeze([
   MOVEMENT_TYPES.RECEIVED,
   MOVEMENT_TYPES.TRANSFERRED_IN,
+  MOVEMENT_TYPES.REFUNDED,
 ]);
 
 // Movement types that decrease batch stock (positive quantity, but treated as out).

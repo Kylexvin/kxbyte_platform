@@ -268,6 +268,50 @@ const decrementBatchStockTx = async (tx, batchStockId, quantity) => {
   });
 };
 
+// ============================================================
+// REFUND ALLOCATIONS
+// ============================================================
+
+// Find all outbound sale allocations for a sale item, with batch info.
+// Used by the refund wrapper to know which batches supplied the original sale.
+const findSaleAllocationsByItemTx = async (tx, saleItemId) => {
+  return tx.kxTillPharmacySaleBatchAllocation.findMany({
+    where: { saleItemId },
+    orderBy: { createdAt: 'desc' },
+    include: {
+      batch: { select: { id: true, batchNumber: true, expiryDate: true } },
+    },
+  });
+};
+
+// Find a specific allocation by (saleItemId, batchId) for validation.
+const findSaleAllocationByBatchTx = async (tx, saleItemId, batchId) => {
+  return tx.kxTillPharmacySaleBatchAllocation.findFirst({
+    where: { saleItemId, batchId },
+  });
+};
+
+// Increment the reversal counter on an allocation.
+const incrementAllocationRefundedTx = async (tx, allocationId, quantity) => {
+  return tx.kxTillPharmacySaleBatchAllocation.update({
+    where: { id: allocationId },
+    data: { refundedQuantity: { increment: quantity } },
+  });
+};
+
+// Increment batch stock (refund reversal).
+const incrementBatchStockTx = async (tx, batchStockId, quantity) => {
+  return tx.kxTillPharmacyBatchStock.update({
+    where: { id: batchStockId },
+    data: { quantityOnHand: { increment: quantity } },
+  });
+};
+
+// Create a refund → batch allocation row.
+const createRefundAllocationTx = async (tx, data) => {
+  return tx.kxTillPharmacyRefundAllocation.create({ data });
+};
+
 export default {
   // Batches
   findBatch,
@@ -294,4 +338,11 @@ export default {
   //sale operations
   createSaleBatchAllocationTx,
   decrementBatchStockTx,
+
+  // Refund allocations
+  findSaleAllocationsByItemTx,
+  findSaleAllocationByBatchTx,
+  incrementAllocationRefundedTx,
+  incrementBatchStockTx,
+  createRefundAllocationTx,
 };
