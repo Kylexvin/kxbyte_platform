@@ -9,6 +9,7 @@ import pharmacyValidator from '../validators/pharmacy.validator.js';
 import pharmacySaleService from '../services/sales/createSale.js';
 import saleService from '../../../services/sale.service.js';
 import pharmacyRefundService from '../services/sales/refundSale.js';
+import pharmacyTransferService from '../services/transfers/approveTransfer.js';
 
 /**
  * POST /pharmacy/batches/receive
@@ -330,10 +331,60 @@ const createPharmacyRefund = async (req, res) => {
   }
 };
 
+// ============================================================
+// PHARMACY TRANSFERS
+// ============================================================
+
+/**
+ * POST /pharmacy/transfers/:transferId/approve
+ *
+ * Approves a pending transfer with FEFO batch selection.
+ * Core moves aggregate stock. Pharmacy moves the batches.
+ */
+const approveTransfer = async (req, res) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { organizationId, transferId } = req.params;
+
+  try {
+    const transfer = await pharmacyTransferService.approveTransfer({
+      userId,
+      organizationId,
+      transferId,
+    });
+
+    return res.status(200).json({ transfer });
+  } catch (error) {
+    const msg = error.message || '';
+
+    if (msg === 'Transfer not found') {
+      return res.status(404).json({ error: msg });
+    }
+    if (msg.includes('do not have access') || msg.includes('permission')) {
+      return res.status(403).json({ error: msg });
+    }
+    if (
+      msg.includes('already') ||
+      msg.includes('Insufficient stock') ||
+      msg.includes('not found') ||
+      msg.includes('required')
+    ) {
+      return res.status(400).json({ error: msg });
+    }
+
+    console.error('Approve pharmacy transfer error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 export default {
   receiveBatch,
   listBatches,
   listExpiringBatches,
+  approveTransfer,
   createPharmacySale,
   listProductBatches,
   createPharmacyRefund,

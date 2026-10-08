@@ -6,8 +6,8 @@ const createTransfer = async (data) => {
   return prisma.kxTillTransfer.create({ data });
 };
 
-const findTransferById = async (id, organizationId) => {
-  return prisma.kxTillTransfer.findFirst({
+const findTransferById = async (id, organizationId, tx = prisma) => {
+  return tx.kxTillTransfer.findFirst({
     where: { id, organizationId },
     include: {
       sourceBranchProduct: {

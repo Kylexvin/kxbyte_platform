@@ -37,4 +37,9 @@ router.post('/sales', pharmacyController.createPharmacySale);
 
 router.post('/sales/:saleId/refund', pharmacyController.createPharmacyRefund);
 
+// ============================================================
+// TRANSFERS
+// ============================================================
+router.post('/transfers/:transferId/approve', pharmacyController.approveTransfer);
+
 export default router;

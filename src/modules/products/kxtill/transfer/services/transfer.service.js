@@ -6,7 +6,7 @@ import branchProductDb from '../../db/product.db.js';
 import orgDb from '../../../../platform/organizations/db/org.db.js';
 import audit from '../../../../platform/audit/index.js';
 import authorizationService from '../../../../platform/authorization/services/authorization.service.js';
-import { v4 as uuidv4 } from 'uuid';
+
 
 // ============================================================
 // HELPER: Check permission (same pattern as product.service.js)
@@ -169,7 +169,43 @@ const getTransfer = async (userId, organizationId, transferId) => {
 // APPROVE
 // ============================================================
 
+// Public entry — opens the transaction, delegates to approveTransferTx, audits.
 const approveTransfer = async (userId, organizationId, transferId) => {
+  const result = await prisma.$transaction(
+    (tx) => approveTransferTx(tx, userId, organizationId, transferId),
+    { maxWait: 5000, timeout: 15000 }
+  );
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'KXTILL_TRANSFER_APPROVED',
+    resource: 'transfer',
+    resourceId: transferId,
+    metadata: {
+      reference: result.reference,
+      quantity: result.quantity,
+    },
+  });
+
+  return result.transfer;
+};
+
+// Transaction-aware core — composable primitive for verticals.
+// MUST receive an active Prisma.TransactionClient as `tx`.
+// Does NOT open its own transaction. Does NOT use the global prisma client.
+//
+// Returns:
+//   {
+//     transfer,           // updated KxTillTransfer row
+//     transferId,
+//     reference,
+//     quantity,           // Number(transfer.quantitySent)
+//     sourceBranchProductId,
+//     destBranchProductId,
+//     organizationId,
+//   }
+const approveTransferTx = async (tx, userId, organizationId, transferId) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
     throw new Error('Organization not found');
@@ -193,7 +229,7 @@ const approveTransfer = async (userId, organizationId, transferId) => {
     throw new Error('You do not have permission to approve transfers');
   }
 
-  const transfer = await transferDb.findTransferById(transferId, organizationId);
+  const transfer = await transferDb.findTransferById(transferId, organizationId, tx);
   if (!transfer) {
     throw new Error('Transfer not found');
   }
@@ -202,31 +238,33 @@ const approveTransfer = async (userId, organizationId, transferId) => {
     throw new Error(`Transfer is already ${transfer.status.toLowerCase()}`);
   }
 
+  const quantity = Number(transfer.quantitySent);
+
   // Deduct stock from source
-  await branchProductDb.updateStock(transfer.sourceBranchProductId, -Number(transfer.quantitySent));
+  await branchProductDb.updateStock(transfer.sourceBranchProductId, -quantity, tx);
 
   // Add stock to destination
-  await branchProductDb.updateStock(transfer.destBranchProductId, Number(transfer.quantitySent));
+  await branchProductDb.updateStock(transfer.destBranchProductId, quantity, tx);
 
-  const updated = await transferDb.updateTransfer(transferId, {
-    status: 'APPROVED',
-    approvedById: userId,
-    approvedAt: new Date(),
-  });
-
-  await audit.log({
-    organizationId,
-    userId,
-    action: 'KXTILL_TRANSFER_APPROVED',
-    resource: 'transfer',
-    resourceId: transferId,
-    metadata: {
-      reference: transfer.reference,
-      quantity: transfer.quantitySent,
+  const updated = await transferDb.updateTransfer(
+    transferId,
+    {
+      status: 'APPROVED',
+      approvedById: userId,
+      approvedAt: new Date(),
     },
-  });
+    tx
+  );
 
-  return updated;
+  return {
+    transfer: updated,
+    transferId: updated.id,
+    reference: transfer.reference,
+    quantity,
+    sourceBranchProductId: transfer.sourceBranchProductId,
+    destBranchProductId: transfer.destBranchProductId,
+    organizationId,
+  };
 };
 
 // ============================================================
@@ -377,6 +415,7 @@ export default {
   getTransfers,
   getTransfer,
   approveTransfer,
+  approveTransferTx,
   completeTransfer,
   rejectTransfer,
   getTransferStats,

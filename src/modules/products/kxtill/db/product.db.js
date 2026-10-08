@@ -334,8 +334,8 @@ const updateBranchProductStock = async (branchProductId, data) => {
   });
 };
 
-const updateStock = async (branchProductId, quantity) => {
-  return prisma.kxTillBranchProduct.update({
+const updateStock = async (branchProductId, quantity, tx = prisma) => {
+  return tx.kxTillBranchProduct.update({
     where: { id: branchProductId },
     data: {
       stock: {
