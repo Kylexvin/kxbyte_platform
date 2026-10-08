@@ -38,10 +38,11 @@ import jwt from '../utils/jwt.js';
 import authService from '../services/auth.service.js';
 import authCodeStore from '../utils/authCodeStore.js';
 
-const VALID_CLIENTS = ['kxtill', 'kxinvoice', 'kxcrm', 'kxsuite'];
+const VALID_CLIENTS = ['kxtill', 'kxtill-pharmacy', 'kxinvoice', 'kxcrm', 'kxsuite'];
 
 const ALLOWED_REDIRECTS = {
   kxtill: process.env.KXTILL_REDIRECT_URI || 'http://localhost:3000/kx/kxtill/oauth/callback',
+  'kxtill-pharmacy': process.env.KXTILL_PHARMACY_REDIRECT_URI || 'http://localhost:3001/kx/kxtill/oauth/callback',  // ← port?
   kxinvoice: process.env.KXINVOICE_REDIRECT_URI || 'http://localhost:3000/kx/kxinvoice/oauth/callback',
   kxcrm: process.env.KXCRM_REDIRECT_URI || 'http://localhost:3000/kx/kxcrm/oauth/callback',
   kxsuite: process.env.KXSUITE_REDIRECT_URI || 'http://localhost:3000/dashboard/oauth/callback',
@@ -864,12 +865,13 @@ const authorize = async (req, res) => {
     return res.redirect(`${redirect_uri}?code=${code}${state ? `&state=${state}` : ''}`);
   }
 
-  const productNames = {
-    kxtill: 'KXTill',
-    kxinvoice: 'KXInvoice',
-    kxcrm: 'KXCRM',
-    kxsuite: 'KXSuite'
-  };
+const productNames = {
+  kxtill: 'KXTill',
+  'kxtill-pharmacy': 'KXTill Pharmacy',
+  kxinvoice: 'KXInvoice',
+  kxcrm: 'KXCRM',
+  kxsuite: 'KXSuite'
+};
   const productName = productNames[client_id] || client_id;
 
   const errorMessage = req.query.error === 'invalid_credentials' 
