@@ -30,6 +30,7 @@ router.get('/products/:productId/batches', pharmacyController.listProductBatches
 // SALES
 // ============================================================
 router.post('/sales', pharmacyController.createPharmacySale);
+router.post('/sales/offline', pharmacyController.createPharmacyOfflineSale);
 
 // ============================================================
 // REFUNDS

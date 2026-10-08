@@ -10,6 +10,7 @@ import pharmacySaleService from '../services/sales/createSale.js';
 import saleService from '../../../services/sale.service.js';
 import pharmacyRefundService from '../services/sales/refundSale.js';
 import pharmacyTransferService from '../services/transfers/approveTransfer.js';
+import pharmacyOfflineSaleService from '../services/sales/createOfflineSale.js';
 
 /**
  * POST /pharmacy/batches/receive
@@ -257,6 +258,64 @@ const createPharmacySale = async (req, res) => {
   }
 };
 
+
+// ============================================================
+// PHARMACY OFFLINE SALES
+// ============================================================
+
+/**
+ * POST /pharmacy/sales/offline
+ *
+ * Creates a pharmacy sale from an offline terminal.
+ * Same body as Core offline sale — server re-runs FEFO.
+ * Idempotent on clientSaleId.
+ */
+const createPharmacyOfflineSale = async (req, res) => {
+  const userId = req.user?.userId;
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const { organizationId } = req.params;
+
+  try {
+    const saleId = await pharmacyOfflineSaleService.createOfflineSale({
+      userId,
+      organizationId,
+      data: req.body,
+    });
+
+    const { default: saleService } = await import('../../../services/sale.service.js');
+    const sale = await saleService.getSale(organizationId, userId, saleId);
+
+    return res.status(201).json({ sale });
+  } catch (error) {
+    const msg = error.message || '';
+
+    if (msg.includes('Insufficient stock')) {
+      return res.status(400).json({ error: msg, code: 'INSUFFICIENT_STOCK' });
+    }
+    if (msg === 'Organization not found' || msg === 'Branch not found' || msg.includes('not found')) {
+      return res.status(404).json({ error: msg });
+    }
+    if (msg.includes('permission') || msg.includes('do not have access')) {
+      return res.status(403).json({ error: msg });
+    }
+    if (
+      msg.includes('required') ||
+      msg.includes('Credit') ||
+      msg.includes('payment') ||
+      msg.includes('Payments') ||
+      msg.includes('not available at this branch')
+    ) {
+      return res.status(400).json({ error: msg });
+    }
+
+    console.error('Create pharmacy offline sale error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 // ============================================================
 // PHARMACY REFUNDS
 // ============================================================
@@ -380,12 +439,15 @@ const approveTransfer = async (req, res) => {
   }
 };
 
+
+
 export default {
   receiveBatch,
   listBatches,
   listExpiringBatches,
   approveTransfer,
   createPharmacySale,
+  createPharmacyOfflineSale,
   listProductBatches,
   createPharmacyRefund,
 };
