@@ -13,13 +13,17 @@ const findTransferById = async (id, organizationId, tx = prisma) => {
       sourceBranchProduct: {
         include: {
           branch: true,
-          product: true,
+          product: {
+            include: { pharmacyProduct: true },
+          },
         },
       },
       destBranchProduct: {
         include: {
           branch: true,
-          product: true,
+          product: {
+            include: { pharmacyProduct: true },
+          },
         },
       },
       initiatedBy: {
@@ -78,13 +82,17 @@ const findTransfersByOrganization = async (organizationId, filters = {}) => {
         sourceBranchProduct: {
           include: {
             branch: true,
-            product: true,
+            product: {
+              include: { pharmacyProduct: true },
+            },
           },
         },
         destBranchProduct: {
           include: {
             branch: true,
-            product: true,
+            product: {
+              include: { pharmacyProduct: true },
+            },
           },
         },
         initiatedBy: {
