@@ -31,6 +31,7 @@ router.get('/products/:productId/batches', pharmacyController.listProductBatches
 // ============================================================
 router.post('/sales', pharmacyController.createPharmacySale);
 router.post('/sales/offline', pharmacyController.createPharmacyOfflineSale);
+router.get('/sales/:saleId/allocations', pharmacyController.getSaleAllocations);
 
 // ============================================================
 // REFUNDS

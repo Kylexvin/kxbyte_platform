@@ -11,6 +11,7 @@ import saleService from '../../../services/sale.service.js';
 import pharmacyRefundService from '../services/sales/refundSale.js';
 import pharmacyTransferService from '../services/transfers/approveTransfer.js';
 import pharmacyOfflineSaleService from '../services/sales/createOfflineSale.js';
+import getAllocationsService from '../services/sales/getSaleAllocations.js';
 
 /**
  * POST /pharmacy/batches/receive
@@ -439,7 +440,36 @@ const approveTransfer = async (req, res) => {
   }
 };
 
+// ============================================================
+// SALE ALLOCATIONS (for refund UI)
+// ============================================================
 
+/**
+ * GET /pharmacy/sales/:saleId/allocations
+ *
+ * Returns per sale item, the batch allocations used, with remaining
+ * refundable quantity. Used by the refund modal to build a batch picker.
+ */
+const getSaleAllocations = async (req, res) => {
+  const userId = req.user?.userId;
+  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { organizationId, saleId } = req.params;
+
+  try {
+    const result = await getAllocationsService.getSaleAllocations({
+      organizationId,
+      saleId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error.message === 'Sale not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    console.error('Get sale allocations error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
 
 export default {
   receiveBatch,
@@ -450,4 +480,5 @@ export default {
   createPharmacyOfflineSale,
   listProductBatches,
   createPharmacyRefund,
+ getSaleAllocations,
 };

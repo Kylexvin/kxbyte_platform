@@ -128,11 +128,11 @@ const createOfflineSale = async ({ userId, organizationId, data }) => {
           });
         }
       }
-
+      
       return createdSaleId;
     },
-    { maxWait: 5000, timeout: 15000 }
-  );
+    { maxWait: 5000, timeout: 60000 }
+  ); 
 
   return saleId;
 };

@@ -70,8 +70,28 @@ const receiveBatch = async (params) => {
   }
   if (!userId) throw new Error('userId is required');
 
-  // ─── Confirm the branch product exists for this org/branch/product ───
-  const branchProduct = await prisma.kxTillBranchProduct.findUnique({
+  // ─── Verify the product belongs to the org ───
+  const product = await prisma.kxTillProduct.findFirst({
+    where: { id: productId, organizationId, isActive: true },
+    select: { id: true },
+  });
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  // ─── Verify the branch belongs to the org ───
+  const branch = await prisma.branch.findFirst({
+    where: { id: branchId, organizationId, isActive: true },
+    select: { id: true },
+  });
+  if (!branch) {
+    throw new Error('Branch not found');
+  }
+
+  // ─── Find or auto-create the branch product ───
+  // Receiving stock is the act of a branch starting to carry the medicine.
+  // No reason to force a separate "add to branch" step.
+  let branchProduct = await prisma.kxTillBranchProduct.findUnique({
     where: {
       productId_branchId: {
         productId,
@@ -81,9 +101,15 @@ const receiveBatch = async (params) => {
   });
 
   if (!branchProduct) {
-    throw new Error(
-      'Branch product not found. Create the product at this branch before receiving stock.'
-    );
+    branchProduct = await prisma.kxTillBranchProduct.create({
+      data: {
+        productId,
+        branchId,
+        isAvailable: true,
+        stock: 0,
+        minStock: 0,
+      },
+    });
   }
 
   // ─── The 4-step invariant, all in one transaction ───
@@ -118,7 +144,7 @@ const receiveBatch = async (params) => {
       batchStockId: batchStock.id,
       batchId: batch.id,
       movementType: MOVEMENT_TYPES.RECEIVED,
-      quantity: Number(quantityBase),  // signed convention: positive = inbound
+      quantity: Number(quantityBase),
       reason: reason ?? null,
       referenceId: null,
       referenceType: 'MANUAL_RECEIVE',

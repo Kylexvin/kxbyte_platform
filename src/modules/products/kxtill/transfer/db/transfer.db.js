@@ -87,6 +87,7 @@ const findTransfersByOrganization = async (organizationId, filters = {}) => {
             },
           },
         },
+        
         destBranchProduct: {
           include: {
             branch: true,

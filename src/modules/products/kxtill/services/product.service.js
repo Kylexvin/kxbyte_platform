@@ -750,15 +750,16 @@ const getBranchProductsForSync = async (organizationId, branchId, since, limit =
   const [items, total] = await Promise.all([
     prisma.kxTillBranchProduct.findMany({
       where,
-      include: {
-        product: {
-          include: {
-            units: true,
-            baseUnit: true,
-          },
-        },
-        branch: true,
-      },
+include: {
+  product: {
+    include: {
+      units: true,
+      baseUnit: true,
+      pharmacyProduct: true,
+    },
+  },
+  branch: true,
+},
       orderBy: { updatedAt: 'asc' },
       skip: offset,
       take: limit,
@@ -782,6 +783,7 @@ const getBranchProductsForSync = async (organizationId, branchId, since, limit =
     branchId: item.branchId,
     branchName: item.branch?.name || 'Unknown',
     updatedAt: item.updatedAt,
+    pharmacyProduct: item.product?.pharmacyProduct || null,
   }));
 
   // ─────────────────────────────────────────────────────────

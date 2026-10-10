@@ -240,6 +240,7 @@ const getBranchProducts = async (branchId, organizationId, filters = {}) => {
     include: {
       units: true,
       baseUnit: true,
+      pharmacyProduct: true,  
       branchProducts: {
         where: { branchId },
         include: { branch: true },
@@ -264,6 +265,7 @@ const getBranchProducts = async (branchId, organizationId, filters = {}) => {
       include: {
         units: true,
         baseUnit: true,
+        pharmacyProduct: true,
       },
       orderBy: { name: 'asc' },
       take: remaining,
@@ -285,6 +287,7 @@ const getBranchProducts = async (branchId, organizationId, filters = {}) => {
       isAvailable: bp?.isAvailable ?? true,
       units: p.units,
       baseUnit: p.baseUnit,
+      pharmacyProduct: p.pharmacyProduct,
       branchId,
       branchName: bp?.branch?.name || 'Unknown',
     };
@@ -303,6 +306,7 @@ const getBranchProducts = async (branchId, organizationId, filters = {}) => {
     isAvailable: true,
     units: p.units,
     baseUnit: p.baseUnit,
+    pharmacyProduct: p.pharmacyProduct, 
     branchId,
     branchName: 'Unknown',
   });
