@@ -205,6 +205,17 @@ const markVerificationTokenUsed = async (id) => {
   });
 };
 
+const invalidateVerificationTokensByType = async (userId, type) => {
+  return prisma.verificationToken.updateMany({
+    where: {
+      userId,
+      type,
+      usedAt: null,
+    },
+    data: { usedAt: new Date() },
+  });
+};
+
 const deleteVerificationToken = async (id) => {
   return prisma.verificationToken.delete({ where: { id } });
 };
@@ -322,6 +333,7 @@ export default {
   findUnusedVerificationTokenByType,
   updateVerificationToken,
   markVerificationTokenUsed,
+  invalidateVerificationTokensByType,
   deleteVerificationToken,
   deleteExpiredVerificationTokens,
   countPasswordResetRequests,

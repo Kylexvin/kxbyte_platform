@@ -58,6 +58,10 @@ const hashToken = (token) => {
  * Register a new user account.
  * Creates user, generates verification token, and issues JWT tokens.
  */
+/**
+ * Register a new user account.
+ * Creates user, generates verification token, and issues JWT tokens.
+ */
 const register = async (data, req = null) => {
   const { email, password: plainPassword, firstName, lastName } = data;
 
@@ -90,17 +94,17 @@ const register = async (data, req = null) => {
   });
 
   // Send email with raw token (frontend receives unhashed token)
-  await sendVerificationEmail(user.email, rawVerifyToken, user.firstName);
+  const emailResult = await sendVerificationEmail(user.email, rawVerifyToken, user.firstName);
 
   const accessToken = jwt.generateAccessToken(user);
   const refreshToken = jwt.generateRefreshToken(user);
 
-await authDb.createSession({
-  userId: user.id,
-  refreshToken,
-  expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
-  ...getRequestMeta(req),
-});
+  await authDb.createSession({
+    userId: user.id,
+    refreshToken,
+    expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
+    ...getRequestMeta(req),
+  });
 
   // Audit: User registration
   await audit.log({
@@ -131,13 +135,70 @@ await authDb.createSession({
     console.error('Failed to send welcome notification:', error.message);
   }
 
+  const organizations = await authDb.findOrganizationsByUserId(user.id);
+
+  const formattedOrgs = organizations.map((org) => ({
+    id: org.id,
+    name: org.name,
+    slug: org.slug,
+    role: org.ownerId === user.id ? 'Owner' : 'Member',
+  }));
+
   const { password: _, ...userWithoutPassword } = user;
 
-  return {
-    user: userWithoutPassword,
-    accessToken,
-    refreshToken,
-  };
+return {
+  user: userWithoutPassword,
+  accessToken,
+  refreshToken,
+  organizations: formattedOrgs,
+  emailSent: emailResult?.success !== false,
+};
+};
+
+/**
+ * Resend the email verification link.
+ * Always returns success to prevent email enumeration.
+ */
+const resendVerification = async (email, req = null) => {
+  const normalizedEmail = email.toLowerCase().trim();
+  const user = await authDb.findUserByEmail(normalizedEmail);
+
+  if (!user) {
+    return { message: 'If your email is registered, you will receive a verification link' };
+  }
+
+  if (user.isEmailVerified) {
+    return { message: 'If your email is registered, you will receive a verification link' };
+  }
+
+  await authDb.invalidateVerificationTokensByType(user.id, 'EMAIL_VERIFICATION');
+
+  const rawVerifyToken = crypto.randomBytes(32).toString('hex');
+  const hashedVerifyToken = hashToken(rawVerifyToken);
+
+  await authDb.createVerificationToken({
+    userId: user.id,
+    token: hashedVerifyToken,
+    type: 'EMAIL_VERIFICATION',
+    expiresAt: new Date(Date.now() + TOKEN_EXPIRY.VERIFICATION),
+  });
+
+  await sendVerificationEmail(user.email, rawVerifyToken, user.firstName);
+
+  await audit.log({
+    organizationId: null,
+    userId: user.id,
+    action: 'EMAIL_VERIFICATION_RESENT',
+    resource: 'user',
+    resourceId: user.id,
+    metadata: {
+      email: user.email,
+    },
+    ipAddress: req?.ip,
+    userAgent: req?.headers?.['user-agent'],
+  });
+
+  return { message: 'If your email is registered, you will receive a verification link' };
 };
 
 /**
@@ -186,15 +247,36 @@ const login = async (email, plainPassword, req = null) => {
     throw new Error('Invalid credentials');
   }
 
+  if (!user.isEmailVerified) {
+    await audit.log({
+      organizationId: null,
+      userId: user.id,
+      action: 'USER_LOGIN_FAILED',
+      resource: 'user',
+      resourceId: user.id,
+      metadata: {
+        email: user.email,
+        reason: 'Email not verified',
+      },
+      ipAddress: req?.ip,
+      userAgent: req?.headers?.['user-agent'],
+    });
+
+    const err = new Error('Email not verified');
+    err.code = 'EMAIL_NOT_VERIFIED';
+    err.email = user.email;
+    throw err;
+  }
+
   const accessToken = jwt.generateAccessToken(user);
   const refreshToken = jwt.generateRefreshToken(user);
 
-const session = await authDb.createSession({
-  userId: user.id,
-  refreshToken,
-  expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
-  ...getRequestMeta(req),
-});
+  const session = await authDb.createSession({
+    userId: user.id,
+    refreshToken,
+    expiresAt: new Date(Date.now() + TOKEN_EXPIRY.REFRESH),
+    ...getRequestMeta(req),
+  });
 
   const organizations = await authDb.findOrganizationsByUserId(user.id);
 
@@ -233,7 +315,7 @@ const session = await authDb.createSession({
       message: `You logged in from ${getRequestMeta(req).ipAddress || 'an unknown location'}`,
       channel: 'IN_APP',
       metadata: {
-       ip: getRequestMeta(req).ipAddress,
+        ip: getRequestMeta(req).ipAddress,
         userAgent: req?.headers?.['user-agent'],
       },
     });
@@ -696,6 +778,7 @@ export default {
   forgotPassword,
   resetPassword,
   verifyEmail,
+  resendVerification,
   changePassword,
   logoutAllDevices,
   getSessions,

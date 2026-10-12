@@ -44,6 +44,7 @@ router.post('/reset-password/html', passwordResetLimiter, oauthController.resetP
 router.get('/register', oauthController.registerPage);
 router.get('/verify-email', oauthController.verifyEmailPage);
 
+
 // ============================================================
 // STANDARD AUTH (JSON API)
 // ============================================================
@@ -54,6 +55,8 @@ router.post('/refresh', authController.refresh);
 router.post('/logout', authController.logout);
 router.post('/forgot-password', passwordResetLimiter, authController.forgotPassword);
 router.post('/reset-password', authController.resetPassword);
+router.get('/verify-email/json', authController.verifyEmail);
+router.post('/resend-verification', passwordResetLimiter, authController.resendVerification);
 
 
 // ============================================================

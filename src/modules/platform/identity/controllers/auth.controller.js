@@ -2,6 +2,12 @@
 
 import authService from '../services/auth.service.js';
 import authValidator from '../validators/auth.validator.js';
+import {
+  ERROR_CODES,
+  AppError,
+  sendError,
+  sendValidationError,
+} from '../utils/errors.js';
 
 const AUTH_BASE_URL = process.env.AUTH_BASE_URL || 'http://localhost:5000';
 
@@ -16,7 +22,7 @@ const register = async (req, res) => {
         `${AUTH_BASE_URL}/api/v1/auth/register?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=registration_failed`
       );
     }
-    return res.status(400).json({ errors: validation.errors });
+    return sendValidationError(res, validation.errors);
   }
 
   try {
@@ -32,23 +38,23 @@ const register = async (req, res) => {
     console.error('Registration error:', error);
 
     if (isBrowserFlow) {
-      const errorCode = error.code === 'EMAIL_EXISTS' ? 'email_exists' : 'registration_failed';
+      const errorCode = error.code === ERROR_CODES.EMAIL_EXISTS ? 'email_exists' : 'registration_failed';
       return res.redirect(
         `${AUTH_BASE_URL}/api/v1/auth/register?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=${errorCode}`
       );
     }
 
-    if (error.code === 'EMAIL_EXISTS') {
-      return res.status(409).json({ error: error.message });
+    if (error.code === ERROR_CODES.EMAIL_EXISTS) {
+      return sendError(res, new AppError(ERROR_CODES.EMAIL_EXISTS, error.message));
     }
-    return res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
 const login = async (req, res) => {
   const validation = authValidator.validateLogin(req.body);
   if (!validation.valid) {
-    return res.status(400).json({ errors: validation.errors });
+    return sendValidationError(res, validation.errors);
   }
 
   try {
@@ -57,16 +63,26 @@ const login = async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'Invalid credentials') {
-      return res.status(401).json({ error: error.message });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, 'Email or password is incorrect'));
     }
-    res.status(500).json({ error: 'Internal server error' });
+    if (error.code === ERROR_CODES.EMAIL_NOT_VERIFIED) {
+      return sendError(
+        res,
+        new AppError(
+          ERROR_CODES.EMAIL_NOT_VERIFIED,
+          'Email not verified',
+          { email: error.email }
+        )
+      );
+    }
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
 const refresh = async (req, res) => {
   const validation = authValidator.validateRefreshToken(req.body);
   if (!validation.valid) {
-    return res.status(400).json({ errors: validation.errors });
+    return sendValidationError(res, validation.errors);
   }
 
   try {
@@ -75,9 +91,9 @@ const refresh = async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'Invalid refresh token' || error.message === 'Refresh token expired') {
-      return res.status(401).json({ error: error.message });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, error.message));
     }
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -85,12 +101,12 @@ const logout = async (req, res) => {
   try {
     const { refreshToken } = req.body;
     if (!refreshToken) {
-      return res.status(400).json({ error: 'Refresh token required' });
+      return sendValidationError(res, { refreshToken: 'Refresh token required' });
     }
     const result = await authService.logout(refreshToken);
     res.status(200).json(result);
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -98,15 +114,15 @@ const getMe = async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, 'Unauthorized'));
     }
     const user = await authService.getMe(userId);
     res.status(200).json(user);
   } catch (error) {
     if (error.message === 'User not found') {
-      return res.status(404).json({ error: error.message });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, error.message));
     }
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -114,7 +130,7 @@ const revokeSession = async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, 'Unauthorized'));
     }
 
     const { sessionId } = req.params;
@@ -122,10 +138,10 @@ const revokeSession = async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'Session not found' || error.message === 'Cannot revoke current session') {
-      return res.status(400).json({ error: error.message });
+      return sendError(res, new AppError(ERROR_CODES.VALIDATION_ERROR, error.message));
     }
     console.error('Revoke session error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -133,7 +149,7 @@ const updateProfile = async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, 'Unauthorized'));
     }
 
     const { firstName, lastName } = req.body;
@@ -141,10 +157,10 @@ const updateProfile = async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'User not found') {
-      return res.status(404).json({ error: error.message });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, error.message));
     }
     console.error('Update profile error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -159,12 +175,11 @@ const forgotPassword = async (req, res) => {
         `${AUTH_BASE_URL}/api/v1/auth/forgot-password?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=registration_failed`
       );
     }
-    return res.status(400).json({ errors: validation.errors });
+    return sendValidationError(res, validation.errors);
   }
 
   try {
     const result = await authService.forgotPassword(email);
-
     if (isBrowserFlow) {
       return res.redirect(
         `${AUTH_BASE_URL}/api/v1/auth/forgot-password?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&success=email_sent`
@@ -172,20 +187,22 @@ const forgotPassword = async (req, res) => {
     }
     return res.status(200).json(result);
   } catch (error) {
-    // Always report success in the browser flow — don't leak whether the email exists
     if (isBrowserFlow) {
       return res.redirect(
         `${AUTH_BASE_URL}/api/v1/auth/forgot-password?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&success=email_sent`
       );
     }
-    return res.status(500).json({ error: 'Internal server error' });
+    if (error.message && error.message.startsWith('Too many reset requests')) {
+      return sendError(res, new AppError(ERROR_CODES.RATE_LIMITED, error.message));
+    }
+    return res.status(200).json({ message: 'If your email is registered, you will receive a reset link' });
   }
 };
 
 const resetPassword = async (req, res) => {
   const validation = authValidator.validateResetPassword(req.body);
   if (!validation.valid) {
-    return res.status(400).json({ errors: validation.errors });
+    return sendValidationError(res, validation.errors);
   }
 
   try {
@@ -193,13 +210,15 @@ const resetPassword = async (req, res) => {
     const result = await authService.resetPassword(token, newPassword);
     res.status(200).json(result);
   } catch (error) {
-    if (error.message === 'Invalid or expired reset token' ||
-        error.message === 'Reset token has expired' ||
-        error.message === 'Reset token has already been used' ||
-        error.message === 'Invalid token type') {
-      return res.status(400).json({ error: error.message });
+    if (
+      error.message === 'Invalid or expired reset token' ||
+      error.message === 'Reset token has expired' ||
+      error.message === 'Reset token has already been used' ||
+      error.message === 'Invalid token type'
+    ) {
+      return sendError(res, new AppError(ERROR_CODES.INVALID_RESET_TOKEN, error.message));
     }
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -207,31 +226,49 @@ const verifyEmail = async (req, res) => {
   try {
     const { token } = req.query;
     if (!token) {
-      return res.status(400).json({ error: 'Verification token required' });
+      return sendValidationError(res, { token: 'Verification token required' });
     }
     const result = await authService.verifyEmail(token);
     res.status(200).json(result);
   } catch (error) {
-    if (error.message === 'Invalid verification token' ||
-        error.message === 'Verification token has expired' ||
-        error.message === 'Verification token has already been used' ||
-        error.message === 'Invalid token type') {
-      return res.status(400).json({ error: error.message });
+    if (
+      error.message === 'Invalid verification token' ||
+      error.message === 'Verification token has expired' ||
+      error.message === 'Verification token has already been used' ||
+      error.message === 'Invalid token type'
+    ) {
+      return sendError(res, new AppError(ERROR_CODES.INVALID_VERIFICATION_TOKEN, error.message));
     }
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
+  }
+};
+
+const resendVerification = async (req, res) => {
+  const validation = authValidator.validateForgotPassword(req.body);
+  if (!validation.valid) {
+    return sendValidationError(res, validation.errors);
+  }
+
+  try {
+    const { email } = req.body;
+    const result = await authService.resendVerification(email, req);
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
 const changePassword = async (req, res) => {
   const validation = authValidator.validateChangePassword(req.body);
   if (!validation.valid) {
-    return res.status(400).json({ errors: validation.errors });
+    return sendValidationError(res, validation.errors);
   }
 
   try {
     const userId = req.user?.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, 'Unauthorized'));
     }
 
     const { currentPassword, newPassword } = req.body;
@@ -239,15 +276,15 @@ const changePassword = async (req, res) => {
     res.status(200).json(result);
   } catch (error) {
     if (error.message === 'User not found') {
-      return res.status(404).json({ error: error.message });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, error.message));
     }
     if (error.message === 'Current password is incorrect') {
-      return res.status(401).json({ error: error.message });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, error.message));
     }
     if (error.message === 'New password must be different from current password') {
-      return res.status(400).json({ error: error.message });
+      return sendError(res, new AppError(ERROR_CODES.VALIDATION_ERROR, error.message));
     }
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -255,12 +292,12 @@ const logoutAllDevices = async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, 'Unauthorized'));
     }
     const result = await authService.logoutAllDevices(userId);
     res.status(200).json(result);
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -268,12 +305,12 @@ const getSessions = async (req, res) => {
   try {
     const userId = req.user?.userId;
     if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      return sendError(res, new AppError(ERROR_CODES.INVALID_CREDENTIALS, 'Unauthorized'));
     }
     const sessions = await authService.getSessions(userId);
     res.status(200).json({ sessions });
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    return sendError(res, new AppError(ERROR_CODES.INTERNAL_ERROR, 'Internal server error'));
   }
 };
 
@@ -287,9 +324,9 @@ export default {
   forgotPassword,
   resetPassword,
   verifyEmail,
+  resendVerification,
   changePassword,
   getSessions,
   logoutAllDevices,
   revokeSession,
-  
 };

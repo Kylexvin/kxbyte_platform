@@ -10,12 +10,13 @@ if (!process.env.RESEND_API_KEY) {
   console.log('Resend API Key loaded');
 }
 
+
+
 // ============================================================
 // BRAND
 // ============================================================
 const BRAND = {
   name: 'KXBYTE',
-  productName: 'KxTill',
   logoUrl: 'https://res.cloudinary.com/dkahrnjrn/image/upload/v1788695499/logo.png',
   supportEmail: 'support@kxbyte.co.ke',
   websiteUrl: 'https://kxbyte.co.ke',
