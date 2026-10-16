@@ -1,0 +1,102 @@
+// src/database/postgres/prisma/platform/payments/mpesa.prisma
+//
+// M-Pesa (Daraja) integration — platform-level.
+//
+// Tenants bring their own Daraja credentials. KXBYTE acts as a software
+// vendor firing STK pushes on their behalf. Money flows directly to the
+// tenant's M-Pesa account. No payment aggregation, no license required.
+//
+// Credentials (consumer key, secret, passkey) are encrypted at the
+// application layer before being written to these columns. The DB stores
+// ciphertext. A leaked DB dump without the master key is useless.
+
+// ============================================================
+// PER-ORGANIZATION MPESA CONFIG
+// ============================================================
+
+model KxMpesaConfig {
+  id             String   @id @default(uuid())
+  organizationId String   @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // SANDBOX | PRODUCTION
+  environment    String
+
+  // Encrypted at rest — ciphertext strings from application-layer encryption.
+  // Shape after decrypt:
+  //   consumerKeyEnc    → "abc123..."
+  //   consumerSecretEnc → "xyz789..."
+  //   passkeyEnc        → "b7f4c9..."
+  consumerKeyEnc    String
+  consumerSecretEnc String
+  passkeyEnc        String
+
+  // Not secret — the merchant's shortcode (Paybill or Till number)
+  shortcode      String
+
+  // Secret token embedded in the callback URL path.
+  // Safaricom POSTs to: /api/v1/payments/mpesa/callback/<callbackToken>
+  // Lookup is by token — never trust the callback payload to identify the org.
+  callbackToken  String   @unique
+
+  isActive       Boolean  @default(true)
+
+  lastTestedAt   DateTime?
+  // OK | FAILED | UNTESTED
+  lastTestResult String?  @default("UNTESTED")
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@map("kx_mpesa_configs")
+}
+
+// ============================================================
+// MPESA TRANSACTIONS
+// ============================================================
+
+model KxMpesaTransaction {
+  id             String   @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // What is being paid for.
+  // Example for a KxTill sale:
+  //   referenceType = 'sale'
+  //   referenceId   = saleId
+  //   productKey    = 'kxtill'
+  referenceType  String
+  referenceId    String
+  productKey     String?
+
+  // Your reference — used to correlate with the sale.
+  merchantRef    String   @unique
+
+  // Daraja-assigned identifiers.
+  checkoutRequestId  String? @unique
+  merchantRequestId  String?
+  mpesaReceiptNumber String?
+
+  amount         Decimal
+  currency       String   @default("KES")
+  phone          String
+
+  // PENDING | SUCCESS | FAILED | CANCELLED | TIMEOUT
+  status         String   @default("PENDING")
+
+  // Raw payloads for audit and troubleshooting.
+  stkResponse    Json?
+  callbackPayload Json?
+  failureReason  String?
+
+  completedAt    DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([referenceType, referenceId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("kx_mpesa_transactions")
+}
