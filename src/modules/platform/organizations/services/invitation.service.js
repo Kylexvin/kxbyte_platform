@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import invitationDb from '../db/invitation.db.js';
 import orgDb from '../db/org.db.js';
 import branchDb from '../../branches/db/branch.db.js';
-import { sendInvitationEmail } from '../../identity/email/email.service.js';
+import { sendInvitationEmail } from '../../email/index.js';
 import audit from '../../audit/index.js';
 
 const INVITATION_EXPIRY_DAYS = 7;

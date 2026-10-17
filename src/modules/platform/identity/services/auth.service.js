@@ -8,9 +8,11 @@ import {
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendPasswordResetConfirmation,
-} from '../email/email.service.js';
+  sendWelcomeEmail,
+} from '../../email/index.js';
 import audit from '../../audit/index.js';
 import notifications from '../../notifications/index.js';
+
 
 /**
  * Extract real client IP + user agent from a request.
@@ -621,9 +623,10 @@ const resetPassword = async (token, newPassword, req = null) => {
  */
 const verifyEmail = async (token, req = null) => {
   const hashedToken = hashToken(token);
+
   const verificationToken = await authDb.findUnusedVerificationTokenByType(
     hashedToken,
-    'EMAIL_VERIFICATION'
+    TOKEN_TYPES.EMAIL_VERIFICATION
   );
 
   if (!verificationToken) {
@@ -642,13 +645,12 @@ const verifyEmail = async (token, req = null) => {
     action: 'EMAIL_VERIFIED',
     resource: 'user',
     resourceId: user.id,
-    metadata: {
-      verificationTokenId: verificationToken.id,
-    },
+    metadata: { verificationTokenId: verificationToken.id },
     ipAddress: req?.ip,
     userAgent: req?.headers?.['user-agent'],
   });
 
+  // Best-effort: failures here must not fail the verification request
   try {
     await notifications.send({
       userId: user.id,
@@ -659,6 +661,12 @@ const verifyEmail = async (token, req = null) => {
     });
   } catch (error) {
     console.error('Failed to send email verification notification:', error.message);
+  }
+
+  try {
+    await sendWelcomeEmail(user.email, user.firstName);
+  } catch (error) {
+    console.error('Failed to send welcome email:', error.message);
   }
 
   return { message: 'Email verified successfully' };

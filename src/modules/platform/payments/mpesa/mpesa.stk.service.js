@@ -134,7 +134,10 @@ export const initiateStkPush = async ({
     BusinessShortCode: config.shortcode,
     Password: password,
     Timestamp: timestamp,
-    TransactionType: 'CustomerPayBillOnline',
+    TransactionType:
+    config.shortcodeType === 'TILL'
+      ? 'CustomerBuyGoodsOnline'
+      : 'CustomerPayBillOnline',
     Amount: amountInt,
     PartyA: normalizedPhone,
     PartyB: config.shortcode,

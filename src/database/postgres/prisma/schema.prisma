@@ -117,6 +117,10 @@ model Organization {
 
   creditLedger CustomerCreditLedger[]
 
+  // ═══ PLATFORM EXTENSIONS ═══
+  mpesaConfig       KxMpesaConfig?
+  mpesaTransactions KxMpesaTransaction[]
+
   memberships Membership[]
   invitations Invitation[]
   organizationProducts OrganizationProduct[]

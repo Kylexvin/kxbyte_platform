@@ -2,7 +2,7 @@
 
 import notificationDb from '../db/notification.db.js';
 import orgDb from '../../organizations/db/org.db.js';
-import { sendNotificationEmail } from '../../identity/email/email.service.js';
+import { sendNotificationEmail } from '../../email/index.js';
 
 const send = async (data) => {
   const {

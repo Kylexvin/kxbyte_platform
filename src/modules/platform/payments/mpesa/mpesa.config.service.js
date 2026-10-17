@@ -19,12 +19,20 @@ const DARAJA_BASE = {
 };
 
 const VALID_ENVIRONMENTS = ['SANDBOX', 'PRODUCTION'];
+const VALID_SHORTCODE_TYPES = ['PAYBILL', 'TILL'];
 
 // ─── validation ──────────────────────────────────────────────
 
 const validateInput = (data) => {
   const errors = [];
-  const { consumerKey, consumerSecret, passkey, shortcode, environment } = data || {};
+  const {
+    consumerKey,
+    consumerSecret,
+    passkey,
+    shortcode,
+    environment,
+    shortcodeType = 'PAYBILL',
+  } = data || {};
 
   if (!consumerKey || typeof consumerKey !== 'string' || consumerKey.length < 20) {
     errors.push('consumerKey is required and must be at least 20 characters');
@@ -41,17 +49,14 @@ const validateInput = (data) => {
   if (!environment || !VALID_ENVIRONMENTS.includes(environment)) {
     errors.push(`environment must be one of: ${VALID_ENVIRONMENTS.join(', ')}`);
   }
+  if (!VALID_SHORTCODE_TYPES.includes(shortcodeType)) {
+    errors.push('shortcodeType must be PAYBILL or TILL');
+  }
 
   return errors;
 };
 
 // ─── masking for API responses ───────────────────────────────
-
-const maskTail = (str) => {
-  if (!str || typeof str !== 'string') return null;
-  if (str.length <= 4) return '****';
-  return '****' + str.slice(-4);
-};
 
 const toApiShape = (row) => {
   if (!row) return null;
@@ -62,13 +67,14 @@ const toApiShape = (row) => {
     organizationId: row.organizationId,
     environment: row.environment,
     shortcode: row.shortcode,
+    shortcodeType: row.shortcodeType || 'PAYBILL',
     isActive: row.isActive,
     lastTestedAt: row.lastTestedAt,
     lastTestResult: row.lastTestResult,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     // masked previews — never the real values
-    consumerKeyMasked: null, // we don't decrypt for the response
+    consumerKeyMasked: null,
     consumerSecretMasked: null,
     passkeyMasked: null,
     // a boolean so UI can render "credentials set"
@@ -111,6 +117,7 @@ export const loadDecryptedConfig = async (organizationId) => {
     consumerSecret,
     passkey,
     shortcode: row.shortcode,
+    shortcodeType: row.shortcodeType || 'PAYBILL',
     callbackToken: row.callbackToken,
     isActive: row.isActive,
   };
@@ -136,6 +143,7 @@ export const saveConfig = async (organizationId, data) => {
     passkey,
     shortcode,
     environment,
+    shortcodeType = 'PAYBILL',
   } = data;
 
   const consumerKeyEnc = encrypt(consumerKey.trim());
@@ -156,6 +164,7 @@ export const saveConfig = async (organizationId, data) => {
     update: {
       environment,
       shortcode: String(shortcode),
+      shortcodeType,
       consumerKeyEnc,
       consumerSecretEnc,
       passkeyEnc,
@@ -167,6 +176,7 @@ export const saveConfig = async (organizationId, data) => {
       organizationId,
       environment,
       shortcode: String(shortcode),
+      shortcodeType,
       consumerKeyEnc,
       consumerSecretEnc,
       passkeyEnc,

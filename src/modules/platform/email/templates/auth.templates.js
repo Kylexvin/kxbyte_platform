@@ -46,3 +46,17 @@ export const passwordChangedEmail = ({ firstName }) => ({
     `,
   }),
 });
+
+export const welcomeEmail = ({ firstName, url }) => ({
+  subject: `Welcome to ${BRAND.name}, ${firstName || 'there'}`,
+  html: buildEmailShell({
+    title: `Your account is ready${firstName ? `, ${firstName}` : ''}`,
+    preheader: 'Set up your organization and activate your first product.',
+    bodyHtml: `
+      ${greeting(firstName)}
+      ${p(`Your email is verified and your ${BRAND.name} account is ready.`)}
+      ${p('Next, create or choose your organization, then activate a product from your dashboard. If you get stuck, reply to this email and a person will help.')}
+      ${button(url, 'Open your dashboard')}
+    `,
+  }),
+});

@@ -6,6 +6,7 @@ import * as authTpl from '../templates/auth.templates.js';
 import * as orgTpl from '../templates/org.templates.js';
 import * as notificationTpl from '../templates/notification.templates.js';
 import * as billingTpl from '../templates/billing.templates.js';
+import * as productTpl from '../templates/product.templates.js';
 
 // ============================================================
 // TRANSPORT
@@ -63,6 +64,8 @@ const deliver = async (to, { subject, html }, { label, devLink } = {}) => {
 
 const authUrl = (path, token) =>
   `${process.env.AUTH_BASE_URL || 'http://localhost:5000'}/api/v1/auth/${path}?token=${token}`;
+
+const appUrl = () => process.env.FRONTEND_URL || 'http://localhost:3000';
 
 // ============================================================
 // AUTH
@@ -132,3 +135,17 @@ export const sendSubscriptionExpiredEmail = (email, data) =>
 
 export const sendPaymentReceivedEmail = (email, data) =>
   deliver(email, billingTpl.paymentReceivedEmail(data), { label: 'Payment received' });
+
+// ============================================================
+// ONBOARDING
+// ============================================================
+
+export const sendWelcomeEmail = (email, firstName) =>
+  deliver(email, authTpl.welcomeEmail({ firstName, url: appUrl() }), { label: 'Welcome' });
+
+export const sendProductActivatedEmail = (email, data) =>
+  deliver(
+    email,
+    productTpl.productActivatedEmail({ ...data, url: data.url || appUrl() }),
+    { label: 'Product activated' }
+  );

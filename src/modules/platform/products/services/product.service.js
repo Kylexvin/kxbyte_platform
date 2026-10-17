@@ -6,7 +6,27 @@ import planDb from '../../subscriptions/db/plan.db.js';
 import subscriptionDb from '../../subscriptions/db/subscription.db.js';
 import subscriptionService from '../../subscriptions/services/subscription.service.js';
 import audit from '../../audit/index.js';
-import { addDays } from 'date-fns';
+import authDb from '../../identity/db/auth.db.js';
+import { sendProductActivatedEmail } from '../../email/index.js';
+
+const sendActivationEmail = async ({ userId, organization, response }) => {
+  try {
+    const user = await authDb.findUserById(userId);
+    if (!user?.email) return;
+
+    await sendProductActivatedEmail(user.email, {
+      firstName: user.firstName,
+      organizationName: organization.name,
+      productName: response.productName,
+      subscriptionStatus: response.subscriptionStatus,
+      trialEnd: response.trialEnd,
+      remainingDays: response.remainingDays,
+    });
+  } catch (error) {
+    console.error('Failed to send product activation email:', error.message);
+  }
+};
+
 
 const createSubscriptionForProduct = async (organizationId, productKey) => {
   const organization = await orgDb.findOrganizationById(organizationId);
@@ -320,7 +340,9 @@ const activateProduct = async (organizationId, userId, productKey, vertical = 'r
     metadata: { productKey: product.key, productName: product.name, vertical },
   });
 
-  return await buildResponse();
+  const response = await buildResponse();
+  sendActivationEmail({ userId, organization, response }); // not awaited, so the API responds immediately
+  return response;
 };
 
 const deactivateProduct = async (organizationId, userId, productKey) => {

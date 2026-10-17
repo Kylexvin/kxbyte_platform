@@ -34,6 +34,9 @@ model KxMpesaConfig {
   // Not secret — the merchant's shortcode (Paybill or Till number)
   shortcode      String
 
+  // PAYBILL | TILL
+  shortcodeType  String   @default("PAYBILL")
+  
   // Secret token embedded in the callback URL path.
   // Safaricom POSTs to: /api/v1/payments/mpesa/callback/<callbackToken>
   // Lookup is by token — never trust the callback payload to identify the org.

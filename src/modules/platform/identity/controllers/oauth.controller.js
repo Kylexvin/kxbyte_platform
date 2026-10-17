@@ -540,7 +540,7 @@ const resendVerificationEmail = async (req, res) => {
       });
 
       // Reuse whatever sends the email in auth.service
-      const emailService = await import('../email/email.service.js');
+      const emailService = await import('../../email/index.js');
       await emailService.sendVerificationEmail(user.email, rawToken, user.firstName);
     }
 
