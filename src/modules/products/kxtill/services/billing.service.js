@@ -12,15 +12,15 @@ const PRODUCT_KEY = 'kxtill';
 // ============================================================
 
 const PAYMENT = {
-  paybill: '247247',
+  paybill: null,
   accountNumberPrefix: 'KXBYTE-KXTILL-',
-  tillNumber: null,            // set if you use till instead of paybill
-  mpesaPhone: '0712345678',    // personal number for manual transfers
-  bankName: 'Equity Bank',
-  bankAccount: '0123456789',
-  bankAccountName: 'KxByte Ltd',
+  tillNumber: null,            
+  mpesaPhone: '0768610613',    
+  bankName: 'I&M Bank',
+  bankAccount: '00108456156150',
+  bankAccountName: 'VINCENT KIPCHIRCHIR',
   contactEmail: 'admin@kxbyte.co.ke',
-  contactPhone: '+254712345678',
+  contactPhone: '+254768610613',
 };
 
 // ============================================================
@@ -191,24 +191,66 @@ function buildAmountInfo({ status, plan, organizationId, lastPayment }) {
   };
 }
 
-function buildHowToPay({ accountNumber, status }) {
-  const steps = [
-    `Go to M-Pesa → Lipa na M-Pesa → Pay Bill`,
-    `Business Number: ${PAYMENT.paybill}`,
-    `Account Number: ${accountNumber}`,
-    `Enter amount (${status === 'TRIAL' ? 'see suggested amount below' : 'per your plan'})`,
-    `Confirm and share the M-Pesa code with ${PAYMENT.contactEmail}`,
-    `We activate your subscription within 24 hours`,
-  ];
+function buildHowToPay({ accountNumber, status, suggestedAmount, currency }) {
+  const amountLine = suggestedAmount
+    ? `Amount: ${currency} ${suggestedAmount}`
+    : 'Amount: confirm with us on WhatsApp before sending';
 
-  return {
-    steps,
-    alternatives: [
-      PAYMENT.tillNumber && `Buy Goods Till: ${PAYMENT.tillNumber}`,
-      PAYMENT.mpesaPhone && `Send Money to: ${PAYMENT.mpesaPhone}`,
-      PAYMENT.bankName && `Bank: ${PAYMENT.bankName} · A/C ${PAYMENT.bankAccount} · ${PAYMENT.bankAccountName}`,
-    ].filter(Boolean),
-  };
+  let primarySteps;
+
+  if (PAYMENT.paybill) {
+    // Paybill path
+    primarySteps = [
+      'Go to M-Pesa → Lipa na M-Pesa → Pay Bill',
+      `Business Number: ${PAYMENT.paybill}`,
+      `Account Number: ${accountNumber}`,
+      amountLine,
+      `Confirm and share the M-Pesa code with ${PAYMENT.contactEmail}`,
+      'We activate your subscription within 24 hours',
+    ];
+  } else if (PAYMENT.tillNumber) {
+    // Till path
+    primarySteps = [
+      'Go to M-Pesa → Lipa na M-Pesa → Buy Goods',
+      `Till Number: ${PAYMENT.tillNumber}`,
+      amountLine,
+      `Confirm and share the M-Pesa code with ${PAYMENT.contactEmail}`,
+      'We activate your subscription within 24 hours',
+    ];
+  } else if (PAYMENT.mpesaPhone) {
+    // Send Money path (your current setup)
+    primarySteps = [
+      'Go to M-Pesa → Send Money',
+      `Phone Number: ${PAYMENT.mpesaPhone}`,
+      amountLine,
+      `Reference: ${accountNumber}`,
+      `Share the M-Pesa confirmation SMS with ${PAYMENT.contactEmail}`,
+      'We activate your subscription within 24 hours',
+    ];
+  } else if (PAYMENT.bankName) {
+    // Bank path (fallback if no mobile channel)
+    primarySteps = [
+      `Bank transfer to ${PAYMENT.bankName}`,
+      `Account Name: ${PAYMENT.bankAccountName}`,
+      `Account Number: ${PAYMENT.bankAccount}`,
+      amountLine,
+      `Use Reference: ${accountNumber}`,
+      `Email the transfer confirmation to ${PAYMENT.contactEmail}`,
+      'We activate your subscription within 24 hours',
+    ];
+  } else {
+    primarySteps = [
+      `Contact us at ${PAYMENT.contactEmail} to arrange payment`,
+    ];
+  }
+
+  const alternatives = [];
+  if (PAYMENT.paybill)      alternatives.push(`Paybill: ${PAYMENT.paybill} · A/C ${accountNumber}`);
+  if (PAYMENT.tillNumber)   alternatives.push(`Buy Goods Till: ${PAYMENT.tillNumber}`);
+  if (PAYMENT.mpesaPhone)   alternatives.push(`M-Pesa Send Money: ${PAYMENT.mpesaPhone}`);
+  if (PAYMENT.bankName)     alternatives.push(`Bank: ${PAYMENT.bankName} · A/C ${PAYMENT.bankAccount} · ${PAYMENT.bankAccountName}`);
+
+  return { steps: primarySteps, alternatives };
 }
 
 // ============================================================
@@ -236,10 +278,12 @@ const getBilling = async (organizationId, userId) => {
     organizationId,
     lastPayment,
   });
-  const howToPay = buildHowToPay({
-    accountNumber: amountInfo.accountNumber,
-    status: status.status,
-  });
+const howToPay = buildHowToPay({
+  accountNumber: amountInfo.accountNumber,
+  status: status.status,
+  suggestedAmount: amountInfo.suggestedAmount,
+  currency: amountInfo.currency,
+});
 
   const phaseStartAt =
     status.status === 'TRIAL' ? sub.trialStart :
