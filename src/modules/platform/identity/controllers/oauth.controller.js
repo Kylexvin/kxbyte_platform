@@ -4,33 +4,38 @@
  * ADDING A NEW PRODUCT TO KXBYTE SSO (e.g. kxwork)
  * ============================================================
  *
- * 1. THIS FILE
+ * 1. src/modules/platform/identity/utils/allowedRedirects.js
  *    - Add the id to VALID_CLIENTS:
- *        const VALID_CLIENTS = [..., 'kxwork'];
- *    - Add its redirect to ALLOWED_REDIRECTS:
- *        kxwork: process.env.KXWORK_REDIRECT_URI || 'http://localhost:3000/kx/kxwork/oauth/callback',
+ *        export const VALID_CLIENTS = [..., 'kxwork'];
+ *    - Add its redirects (array) to ALLOWED_REDIRECTS:
+ *        kxwork: [
+ *          process.env.KXWORK_REDIRECT_URI,
+ *          process.env.KXWORK_MOBILE_REDIRECT_URI,
+ *        ].filter(Boolean),
+ *
+ * 2. THIS FILE
  *    - Add its display name in authorize() -> productNames:
  *        kxwork: 'KXWork',
  *
- * 2. src/app.js
- *    - Add the env var to CLIENT_ORIGINS (feeds the CSP form-action list):
+ * 3. src/app.js
+ *    - Add the web env var to the CSP form-action list:
  *        process.env.KXWORK_REDIRECT_URI,
- *    Without this, Chrome blocks the post-login redirect:
- *    "violates the following Content Security Policy directive: form-action"
+ *    Do NOT add KXWORK_MOBILE_REDIRECT_URI there — a kxwork:// scheme is
+ *    not a valid CSP source, and including it disables form-action.
  *
- * 3. PRODUCTION ENV
+ * 4. PRODUCTION ENV
  *    KXWORK_REDIRECT_URI=https://kxwork.kxbyte.co.ke/kx/kxwork/oauth/callback
- *    Must match the redirect_uri the product sends, exactly.
+ *    KXWORK_MOBILE_REDIRECT_URI=kxwork://auth/callback
  *
- * 4. THE PRODUCT'S OWN APP
- *    - Send users to:
- *        {AUTH_BASE_URL}/api/v1/auth/oauth/authorize?client_id=kxwork&redirect_uri=<encoded callback>&state=<state>
- *    - Handle the callback and POST the code to /api/v1/auth/oauth/token with client_id=kxwork.
+ * 5. THE PRODUCT'S OWN APP
+ *    - Web:   redirect_uri=https://kxwork.kxbyte.co.ke/kx/kxwork/oauth/callback
+ *    - Mobile: redirect_uri=kxwork://auth/callback
+ *    - Both POST the code to /api/v1/auth/oauth/token with client_id=kxwork.
  *
  * SYMPTOMS IF A STEP IS MISSED
- *    "Invalid client_id"      -> step 1 (VALID_CLIENTS)
- *    "Invalid redirect_uri"   -> step 1 or 3 (ALLOWED_REDIRECTS / env mismatch)
- *    CSP form-action error    -> step 2 or 3 (CLIENT_ORIGINS / env not set)
+ *    "Invalid client_id"      -> step 1 (VALID_CLIENTS in util)
+ *    "Invalid redirect_uri"   -> step 1 or 4 (array or env mismatch)
+ *    CSP form-action error    -> step 3 (CLIENT_ORIGINS / env not set)
  * ============================================================
  */
 import authDb from '../db/auth.db.js';
@@ -38,16 +43,9 @@ import jwt from '../utils/jwt.js';
 import authService from '../services/auth.service.js';
 import authCodeStore from '../utils/authCodeStore.js';
 
-const VALID_CLIENTS = ['kxtill', 'kxtill-pharmacy', 'kxinvoice', 'kxcrm', 'kxsuite'];
+import { isValidClient, isAllowedRedirect } from '../utils/allowedRedirects.js';
 
-const ALLOWED_REDIRECTS = {
-  kxtill: process.env.KXTILL_REDIRECT_URI || 'http://localhost:3000/kx/kxtill/oauth/callback',
-  'kxtill-pharmacy': process.env.KXTILL_PHARMACY_REDIRECT_URI || 'http://localhost:3001/kx/kxtill/oauth/callback',  // ← port?
-  kxinvoice: process.env.KXINVOICE_REDIRECT_URI || 'http://localhost:3000/kx/kxinvoice/oauth/callback',
-  kxcrm: process.env.KXCRM_REDIRECT_URI || 'http://localhost:3000/kx/kxcrm/oauth/callback',
-  kxsuite: process.env.KXSUITE_REDIRECT_URI || 'http://localhost:3000/dashboard/oauth/callback',
-};
-
+// ============================================================
 
 const KXBYTE_LOGO_URL = 'https://res.cloudinary.com/dkahrnjrn/image/upload/v1788695499/logo.png';
 const AUTH_BASE_URL = process.env.AUTH_BASE_URL || 'http://localhost:5000';
@@ -845,13 +843,12 @@ const registerPage = async (req, res) => {
 const authorize = async (req, res) => {
   const { client_id, redirect_uri, state } = req.query;
 
-  if (!client_id || !VALID_CLIENTS.includes(client_id)) {
-    return res.status(400).json({ error: 'Invalid client_id' });
-  }
-
-  if (redirect_uri !== ALLOWED_REDIRECTS[client_id]) {
-    return res.status(400).json({ error: 'Invalid redirect_uri' });
-  }
+if (!isValidClient(client_id)) {
+  return res.status(400).json({ error: 'Invalid client_id' });
+}
+if (!isAllowedRedirect(client_id, redirect_uri)) {
+  return res.status(400).json({ error: 'Invalid redirect_uri' });
+}
 
   const userId = req.user?.userId;
   if (userId) {
@@ -1161,9 +1158,9 @@ const productNames = {
 const oauthLogin = async (req, res) => {
   const { email, password, client_id, redirect_uri, state } = req.body;
 
-  if (!client_id || !VALID_CLIENTS.includes(client_id) || redirect_uri !== ALLOWED_REDIRECTS[client_id]) {
-    return res.status(400).send('Invalid client_id or redirect_uri');
-  }
+if (!isValidClient(client_id) || !isAllowedRedirect(client_id, redirect_uri)) {
+  return res.status(400).send('Invalid client_id or redirect_uri');
+}
 
   try {
     const result = await authService.login(email, password, req);
@@ -1185,10 +1182,9 @@ const oauthLogin = async (req, res) => {
 const token = async (req, res) => {
   const { code, client_id } = req.body;
 
-  if (!client_id || !VALID_CLIENTS.includes(client_id)) {
-    return res.status(400).json({ error: 'Invalid client_id' });
-  }
-
+if (!isValidClient(client_id)) {
+  return res.status(400).json({ error: 'Invalid client_id' });
+}
   const authCode = authCodeStore.getAuthCode(code);
   if (!authCode) {
     return res.status(400).json({ error: 'Invalid authorization code' });

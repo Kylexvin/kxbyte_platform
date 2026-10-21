@@ -6,15 +6,9 @@ import authDb from '../db/auth.db.js';
 import authCodeStore from '../utils/authCodeStore.js';
 import jwt from '../utils/jwt.js';
 
-const VALID_CLIENTS = ['kxtill', 'kxtill-pharmacy', 'kxinvoice', 'kxcrm', 'kxsuite'];
+import { isValidClient, isAllowedRedirect } from '../utils/allowedRedirects.js';
 
-const ALLOWED_REDIRECTS = {
-  kxtill: process.env.KXTILL_REDIRECT_URI || 'http://localhost:3000/kx/kxtill/oauth/callback',
-  'kxtill-pharmacy': process.env.KXTILL_PHARMACY_REDIRECT_URI || 'http://localhost:3000/kx/kxtill/oauth/callback',
-  kxinvoice: process.env.KXINVOICE_REDIRECT_URI || 'http://localhost:3000/kx/kxinvoice/oauth/callback',
-  kxcrm: process.env.KXCRM_REDIRECT_URI || 'http://localhost:3000/kx/kxcrm/oauth/callback',
-  kxsuite: process.env.KXSUITE_REDIRECT_URI || 'http://localhost:3000/dashboard/oauth/callback',
-};
+
 
 // ============================================================
 // DIRECT FLOW (KxSuite itself — no client_id/redirect_uri)
@@ -43,10 +37,9 @@ const decodeOAuthState = (encoded) => {
 const googleAuth = (req, res, next) => {
   const { client_id, redirect_uri, state } = req.query;
 
-  if (!client_id || !VALID_CLIENTS.includes(client_id) || redirect_uri !== ALLOWED_REDIRECTS[client_id]) {
-    return res.status(400).send('Invalid client_id or redirect_uri');
-  }
-
+if (!isValidClient(client_id) || !isAllowedRedirect(client_id, redirect_uri)) {
+  return res.status(400).send('Invalid client_id or redirect_uri');
+}
   passport.authenticate('google', {
     scope: ['profile', 'email'],
     session: false,
@@ -57,9 +50,9 @@ const googleAuth = (req, res, next) => {
 const githubAuth = (req, res, next) => {
   const { client_id, redirect_uri, state } = req.query;
 
-  if (!client_id || !VALID_CLIENTS.includes(client_id) || redirect_uri !== ALLOWED_REDIRECTS[client_id]) {
-    return res.status(400).send('Invalid client_id or redirect_uri');
-  }
+if (!isValidClient(client_id) || !isAllowedRedirect(client_id, redirect_uri)) {
+  return res.status(400).send('Invalid client_id or redirect_uri');
+}
 
   passport.authenticate('github', {
     scope: ['user:email'],
@@ -71,9 +64,9 @@ const githubAuth = (req, res, next) => {
 const socialCallback = async (req, res) => {
   const decoded = decodeOAuthState(req.query.state);
 
-  if (!decoded || !VALID_CLIENTS.includes(decoded.client_id) || decoded.redirect_uri !== ALLOWED_REDIRECTS[decoded.client_id]) {
-    return res.redirect(`http://localhost:3000/login?error=social_auth_failed`);
-  }
+if (!decoded || !isValidClient(decoded.client_id) || !isAllowedRedirect(decoded.client_id, decoded.redirect_uri)) {
+  return res.redirect(`http://localhost:3000/login?error=social_auth_failed`);
+}
 
   const { client_id, redirect_uri, state } = decoded;
 
