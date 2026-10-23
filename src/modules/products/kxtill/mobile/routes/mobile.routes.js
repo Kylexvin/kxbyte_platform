@@ -17,6 +17,7 @@ import express from 'express';
 import { attachContext } from '../common/context.js';
 import dashboardController from '../controllers/dashboard.controller.js';
 import branchesController from '../controllers/branches.controller.js';
+import notificationsController from '../controllers/notifications.controller.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -47,5 +48,14 @@ router.get('/branches/:branchId/shifts', branchesController.getBranchShifts);
 router.post('/branches/:branchId/shifts/:shiftId/review', branchesController.postReviewShift);
 router.post('/branches/:branchId/shifts/:shiftId/force-close', branchesController.postForceCloseShift);
 
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+router.get('/notifications', notificationsController.list);
+router.get('/notifications/unread-count', notificationsController.unreadCount);
+router.get('/notifications/:id', notificationsController.detail);
+router.patch('/notifications/:id/read', notificationsController.markRead);
+router.post('/notifications/mark-all-read', notificationsController.markAllRead);
+router.post('/notifications/seed', notificationsController.seed);
 
 export default router;
