@@ -21,6 +21,7 @@ import shiftValidator from '../shift/validators/shift.validator.js';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
 import subscriptionMiddleware from '../../../platform/subscriptions/middleware/subscription.middleware.js';
 import pharmacyVertical from '../verticals/pharmacy/index.js';
+import mobileRoutes from '../mobile/routes/mobile.routes.js';
 
 
 
@@ -169,6 +170,12 @@ router.get('/dashboard/profit', guard, reportController.getProfit);
 router.get('/dashboard/today-stats', guard, reportController.getTodayStats);
 router.get('/dashboard/sales-trend', guard, reportController.getSalesTrend);
 router.get('/dashboard/today-sales-trend', guard, reportController.getTodaySalesTrend);
+
+// ============================================================
+// MOBILE ROUTES
+// ============================================================
+router.use('/mobile', guard, mobileRoutes);
+
 
 // ============================================================
 // EXPORTS ROUTES (reads)

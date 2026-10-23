@@ -1014,6 +1014,7 @@ const getBranchBreakdown = async (organizationId, userId, filters = {}) => {
   const totalTransactions = branchSales.reduce((sum, b) => sum + b.transactions, 0);
 
   const data = branchSales.map((b) => ({
+    id: b.id,
     name: b.name,
     code: b.code,
     sales: Number(b.sales),
