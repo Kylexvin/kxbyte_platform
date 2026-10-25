@@ -8,6 +8,8 @@ import socialController from '../controllers/social.controller.js';
 import passport from '../config/passport.config.js';
 import oauthController from '../controllers/oauth.controller.js';
 import ssoController from '../controllers/sso.controller.js';
+import pairingController from '../controllers/pairing.controller.js';
+
 import {
   loginLimiter,
   registerLimiter,
@@ -26,6 +28,31 @@ router.get('/oauth/authorize', oauthController.authorize);
 router.post('/oauth/login', oauthController.oauthLogin);
 router.post('/oauth/token', oauthController.token);
 router.post('/oauth/revoke', oauthController.revoke);
+
+// ============================================================
+// DEVICE PAIRING (mobile-first device auth)
+// ============================================================
+router.post(
+  '/pairing/session',
+  authMiddleware.authenticate,
+  pairingController.createSession
+);
+router.post('/pairing/redeem', pairingController.redeemSession);
+router.delete(
+  '/pairing/:pairingId',
+  authMiddleware.authenticate,
+  pairingController.revokeSession
+);
+router.post(
+  '/pairing/redeem',
+  loginLimiter,           
+  pairingController.redeemSession
+);
+router.get(
+  '/pairing/:pairingId/status',
+  authMiddleware.authenticate,
+  pairingController.getStatus
+);
 
 // ============================================================
 // SSO (app-to-app single sign-on)

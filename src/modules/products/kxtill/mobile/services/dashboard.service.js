@@ -1,19 +1,11 @@
 // src/modules/products/kxtill/mobile/services/dashboard.service.js
 //
 // Composes the mobile dashboard from existing report service methods.
-//
-// v5 — currency source:
-//   - Reads `currency` from settingService.getSettings(orgId, userId) so the
-//     value reflects whatever the settings screen shows. Falls back to
-//     ctx.organization.currency only if the settings read fails. No country
-//     default — if neither is set, `currency` is null and the mobile card
-//     renders the number without a prefix.
-//
-// All other logic unchanged.
+// No data is recomputed here beyond shaping; the underlying queries do the
+// work. Sections the caller cannot see come back as null.
 
 import reportService from '../../services/report.service.js';
 import shiftService from '../../shift/services/shift.service.js';
-import settingService from '../../services/setting.service.js';
 
 export const SECTION_PERMISSIONS = {
   sales: 'kxtill.sales.view',
@@ -28,19 +20,71 @@ export const SECTION_PERMISSIONS = {
 };
 
 const SHORTCUTS = [
-  { id: 'reports', label: 'Sales reports', icon: 'bar-chart-outline', permission: 'kxtill.reports.view' },
-  { id: 'stock', label: 'Stock', icon: 'cube-outline', permission: 'kxtill.inventory.view' },
-  { id: 'team', label: 'Team', icon: 'people-outline', permission: 'members.view' },
-  { id: 'branches', label: 'Branches', icon: 'storefront-outline', permission: 'branches.view' },
+  {
+    id: 'stock',
+    label: 'Stock',
+    icon: 'cube-outline',
+    permission: 'kxtill.inventory.view',
+  },
+  {
+    id: 'branches',
+    label: 'Branches',
+    icon: 'storefront-outline',
+    permission: 'branches.view',
+  },
 ];
 
 const safe = async (fn, fallback = null) => {
   try {
     return await fn();
-  } catch (e) {
+  } catch {
     return fallback;
   }
 };
+
+// Merge attention items that share the same product name.
+// Used only when the caller views org-wide (no branchId filter).
+// Output keeps the first item's identity and augments `body` with a
+// branch count so the row reads as one problem, not one-per-branch.
+function mergeByProduct(items) {
+  const byKey = new Map();
+  for (const item of items) {
+    const key = (item.productName || item.title || '').trim().toLowerCase();
+    if (!key) {
+      // Nothing to group on — keep as-is.
+      byKey.set(Symbol('unique'), item);
+      continue;
+    }
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, {
+        ...item,
+        branchIds: item.metadata?.branchId ? [item.metadata.branchId] : [],
+        branchNames: item.branchName ? [item.branchName] : [],
+      });
+    } else {
+      if (item.metadata?.branchId) existing.branchIds.push(item.metadata.branchId);
+      if (item.branchName) existing.branchNames.push(item.branchName);
+      existing.branchCount = (existing.branchCount || 1) + 1;
+    }
+  }
+
+  return Array.from(byKey.values()).map((item) => {
+    const count = item.branchCount || item.branchNames?.length || 1;
+    if (count <= 1) return item;
+    const names = item.branchNames || [];
+    const suffix =
+      names.length <= 2
+        ? `at ${names.join(' & ')}`
+        : `at ${count} branches`;
+    return {
+      ...item,
+      title: item.title,
+      body: `${item.body.split(' · ')[0]} · ${suffix}`,
+      branchCount: count,
+    };
+  });
+}
 
 export async function composeDashboard(ctx) {
   const { organizationId, branchId, user, permissions } = ctx;
@@ -64,14 +108,6 @@ export async function composeDashboard(ctx) {
   const organization = ctx.organization;
   const isOwner = organization?.ownerId === user.id || perms.includes('*');
 
-  // Read currency from settings (falls back to org record). Wrapped in safe()
-  // so a settings read failure never blanks the dashboard.
-  const settings = await safe(
-    () => settingService.getSettings(organizationId, user.id),
-    null
-  );
-  const currency = settings?.currency || organization?.currency || null;
-
   const [
     todayStats,
     trend7,
@@ -83,12 +119,15 @@ export async function composeDashboard(ctx) {
     currentShiftRaw,
   ] = await Promise.all([
     canSales
-      ? safe(() => reportService.getTodayStats(organizationId, user.id, branchId))
+      ? safe(() =>
+          reportService.getTodayStats(organizationId, user.id, branchId)
+        )
       : Promise.resolve(null),
 
     canSales
       ? safe(
-          () => reportService.getSalesTrend(organizationId, user.id, 7, branchId),
+          () =>
+            reportService.getSalesTrend(organizationId, user.id, 7, branchId),
           { labels: [], values: [] }
         )
       : Promise.resolve({ labels: [], values: [] }),
@@ -97,7 +136,7 @@ export async function composeDashboard(ctx) {
       ? safe(() =>
           reportService.getNeedsAttention(organizationId, user.id, {
             branchId,
-            limit: 5,
+            limit: 20,
           })
         )
       : Promise.resolve(null),
@@ -142,11 +181,12 @@ export async function composeDashboard(ctx) {
 
     branchId && !isOwner && shiftService?.getCurrentShift
       ? safe(() =>
-          shiftService.getCurrentShift(organizationId, user.id, branchId)
+          shiftService.getCurrentShift(user.id, organizationId)
         )
       : Promise.resolve(null),
   ]);
 
+  // ---- Sales + pulse ----
   let sales = null;
   let pulse = null;
   if (canSales && todayStats) {
@@ -157,7 +197,6 @@ export async function composeDashboard(ctx) {
       prior.length > 0
         ? prior.reduce((s, v) => s + Number(v), 0) / prior.length
         : 0;
-
     const deltaPct =
       todayValue > 0 && priorAvg > 0
         ? Math.round(((todayValue - priorAvg) / priorAvg) * 1000) / 10
@@ -169,9 +208,8 @@ export async function composeDashboard(ctx) {
       itemsSold: Number(todayStats.itemsSold || 0),
       priorAvg,
       deltaPct,
-      currency,
+      currency: ctx.organization.currency || 'KES',
     };
-
     pulse = {
       sales: todayValue,
       transactions: Number(todayStats.transactions || 0),
@@ -179,11 +217,11 @@ export async function composeDashboard(ctx) {
     };
   }
 
-  const attention = [];
-
+  // ---- Attention ----
+  const rawAttention = [];
   if (stockAttention?.items?.length) {
-    for (const item of stockAttention.items.slice(0, 3)) {
-      attention.push({
+    for (const item of stockAttention.items) {
+      rawAttention.push({
         id: item.id,
         kind: item.status === 'Out of Stock' ? 'out-of-stock' : 'low-stock',
         severity: item.status === 'Out of Stock' ? 'danger' : 'warning',
@@ -198,29 +236,43 @@ export async function composeDashboard(ctx) {
         body: `${item.currentStock} ${
           item.currentStock === 1 ? 'unit' : 'units'
         } left at ${item.branch}`,
+        productName: item.product,
+        branchName: item.branch,
+        metadata: { branchId: item.branchId },
         time: null,
       });
     }
   }
 
   if (canSales && sales?.deltaPct != null && sales.deltaPct < -10) {
-    attention.push({
+    rawAttention.push({
       id: 'sales-behind',
       kind: 'sales',
       severity: 'warning',
       icon: 'trending-down-outline',
       title: `Sales ${Math.abs(sales.deltaPct)}% behind usual pace`,
       body: 'Compared to your 7-day average',
+      productName: null,
+      branchName: ctx.branch?.name || null,
+      metadata: { branchId: branchId || null },
       time: null,
     });
   }
 
+  // When scope is org-wide (no branchId), merge per-product. When scoped
+  // to a branch, keep the branch's individual rows as-is.
+  let attention;
+  if (!branchId) {
+    attention = mergeByProduct(rawAttention).slice(0, 3);
+  } else {
+    attention = rawAttention.slice(0, 3);
+  }
+
+  // ---- Branch performance ----
   let branches = null;
   let isOrgWide = false;
-
   if (branchData) {
     isOrgWide = branchData.isOrgWide;
-
     if (branchData.kind === 'breakdown' && branchData.data?.data?.length) {
       branches = branchData.data.data.map((b) => ({
         id: b.id,
@@ -243,6 +295,7 @@ export async function composeDashboard(ctx) {
     }
   }
 
+  // ---- Shift ----
   let shift = null;
   if (currentShiftRaw) {
     shift = {
@@ -254,6 +307,7 @@ export async function composeDashboard(ctx) {
     };
   }
 
+  // ---- Payments ----
   let payments = null;
   if (paymentsRaw?.paymentMethods?.length) {
     payments = {
@@ -267,6 +321,7 @@ export async function composeDashboard(ctx) {
     };
   }
 
+  // ---- Top products (deduped by name) ----
   let products = null;
   if (Array.isArray(productsRaw) && productsRaw.length) {
     const merged = new Map();
@@ -291,6 +346,7 @@ export async function composeDashboard(ctx) {
       .slice(0, 4);
   }
 
+  // ---- Recent ----
   let recent = null;
   if (Array.isArray(recentRaw) && recentRaw.length) {
     recent = recentRaw.map((s) => ({
@@ -302,10 +358,12 @@ export async function composeDashboard(ctx) {
     }));
   }
 
+  // ---- Shortcuts ----
   const shortcuts = SHORTCUTS.filter((s) => hasPerm(s.permission)).map(
     (s) => ({ id: s.id, label: s.label, icon: s.icon })
   );
 
+  // ---- Scope ----
   const scope = {
     branchId: branchId || null,
     isOrgWide,

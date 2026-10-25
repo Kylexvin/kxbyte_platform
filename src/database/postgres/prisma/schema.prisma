@@ -20,6 +20,7 @@ model User {
   updatedAt         DateTime  @updatedAt
   deletedAt         DateTime?
 
+  pairingSessions  PairingSession[]
   ownedOrganizations Organization[] @relation("OrganizationOwner")
   memberships        Membership[]
   sentInvitations    Invitation[] @relation("InvitationSender")
@@ -120,7 +121,8 @@ model Organization {
   // ═══ PLATFORM EXTENSIONS ═══
   mpesaConfig       KxMpesaConfig?
   mpesaTransactions KxMpesaTransaction[]
-
+  
+  pairingSessions  PairingSession[]
   memberships Membership[]
   invitations Invitation[]
   organizationProducts OrganizationProduct[]
@@ -490,6 +492,32 @@ model Notification {
   @@index([type])
   @@index([createdAt])
   @@map("notifications")
+}
+
+// ============================================================
+// DEVICE PAIRING
+// ============================================================
+
+model PairingSession {
+  id             String    @id @default(uuid())
+  tokenHash      String    @unique
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  branchId       String?
+  branch         Branch?   @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  deviceLabel    String?
+  userAgent      String?
+  ipAddress      String?
+  expiresAt      DateTime
+  usedAt         DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("pairing_sessions")
 }
 
 // ============================================================
@@ -1115,6 +1143,7 @@ model Branch {
   sales          KxTillSale[]
   kxtillRefunds KxTillSaleRefund[]
   branchProducts KxTillBranchProduct[]
+  pairingSessions  PairingSession[]
 
   kxtillBranchSetting KxTillBranchSetting?
   kxtillShifts        KxTillShift[]
