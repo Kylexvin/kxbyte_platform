@@ -12,6 +12,8 @@ import authorizationService from '../../../platform/authorization/services/autho
 import prisma from '../../../../database/postgres/prisma.js';
 import creditService from '../credit/services/credit.service.js';
 import refundDb from '../db/refund.db.js';
+import kxtillNotifications from '../notifications/kxtill.notifications.js';
+
 
 const checkPermission = async (userId, organizationId, permissionKey) => {
   return authorizationService.checkPermission(userId, organizationId, permissionKey);
@@ -109,6 +111,60 @@ const resolvePaymentStatus = (payments, totalAmount) => {
 };
 
 // ============================================================
+// POST-COMMIT LOW-STOCK CHECK
+// ============================================================
+
+// For each line item in a just-committed sale, re-read the branch product
+// (now reflecting the decremented stock) and fire a low_stock or
+// out_of_stock notification if it crossed its minStock threshold during
+// this sale. Fire-and-forget — the API response is already prepared.
+//
+// The "before" stock is reconstructed as `stockNow + baseQuantity`, which
+// equals the pre-sale value exactly. This avoids needing to capture stock
+// inside the transaction.
+const checkLowStockAlerts = async (organizationId, saleId) => {
+  try {
+    const sale = await saleDb.findSaleById(saleId, organizationId);
+    if (!sale?.items?.length) return;
+
+    const branch = await branchDb.findBranchById(sale.branchId, organizationId);
+
+    for (const item of sale.items) {
+      if (!item.branchProductId) continue;
+
+      const bp = await prisma.kxTillBranchProduct.findUnique({
+        where: { id: item.branchProductId },
+        include: { product: { include: { baseUnit: true } } },
+      });
+      if (!bp || !bp.product?.trackInventory) continue;
+
+      const stockNow = Number(bp.stock);
+      const minStock = Number(bp.minStock);
+      const baseQty = Number(item.baseQuantity || item.quantity);
+
+      // Did this sale take the item from above minStock to at-or-below?
+      const wasAbove = stockNow + baseQty > minStock;
+      if (!wasAbove) continue;
+
+      const payload = {
+        organizationId,
+        branchProduct: bp,
+        product: bp.product,
+        branch,
+      };
+
+      if (stockNow === 0) {
+        await kxtillNotifications.notifyOutOfStock(payload);
+      } else if (stockNow <= minStock) {
+        await kxtillNotifications.notifyLowStock(payload);
+      }
+    }
+  } catch (e) {
+    console.error('[sale.service] low-stock alert failed:', e.message);
+  }
+};
+
+// ============================================================
 // CREATE SALE (online)
 // ============================================================
 
@@ -153,6 +209,7 @@ const createSale = async (userId, organizationId, data) => {
     },
   });
 
+  checkLowStockAlerts(organizationId, saleId).catch(() => {});
   return sale;
 };
 
@@ -439,6 +496,9 @@ const createOfflineSale = async (userId, organizationId, data) => {
         creditAmount,
       },
     });
+
+    checkLowStockAlerts(organizationId, saleId).catch(() => {});
+
   }
 
   return sale;

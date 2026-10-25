@@ -8,6 +8,7 @@ import orgDb from '../../../../platform/organizations/db/org.db.js';
 import branchDb from '../../../../platform/branches/db/branch.db.js';
 import audit from '../../../../platform/audit/index.js';
 import authorizationService from '../../../../platform/authorization/services/authorization.service.js';
+import kxtillNotifications from '../../notifications/kxtill.notifications.js';
 
 const checkPermission = async (userId, organizationId, permissionKey) => {
   return authorizationService.checkPermission(userId, organizationId, permissionKey);
@@ -32,6 +33,14 @@ const getThreshold = async (branchId) => {
 
 const resolveCloseStatus = (variance, threshold) => {
   return Math.abs(variance) > threshold ? 'CLOSED_PENDING_REVIEW' : 'CLOSED';
+};
+
+// Fire a variance notification if the shift closed pending review.
+// Fire-and-forget: a notification failure must never block the close.
+const maybeNotifyVariance = (closedShift) => {
+  if (closedShift && closedShift.status === 'CLOSED_PENDING_REVIEW') {
+    kxtillNotifications.notifyShiftVariance(closedShift).catch(() => {});
+  }
 };
 
 // ============================================================
@@ -143,7 +152,9 @@ const closeShift = async (userId, organizationId, shiftId, declaredCash) => {
     },
   });
 
-  return shiftDb.findShiftById(updated.id, organizationId);
+  const closed = await shiftDb.findShiftById(updated.id, organizationId);
+  maybeNotifyVariance(closed);
+  return closed;
 };
 
 // ============================================================
@@ -237,7 +248,9 @@ const forceCloseShift = async (userId, organizationId, shiftId, declaredCash, re
     },
   });
 
-  return shiftDb.findShiftById(updated.id, organizationId);
+  const closed = await shiftDb.findShiftById(updated.id, organizationId);
+  maybeNotifyVariance(closed);
+  return closed;
 };
 
 // ============================================================
@@ -338,7 +351,9 @@ const resolveHandover = async (userId, organizationId, shiftId, declaredCash, no
     },
   });
 
-  return shiftDb.findShiftById(updated.id, organizationId);
+  const closed = await shiftDb.findShiftById(updated.id, organizationId);
+  maybeNotifyVariance(closed);
+  return closed;
 };
 
 const rejectHandover = async (userId, organizationId, shiftId, note = null) => {

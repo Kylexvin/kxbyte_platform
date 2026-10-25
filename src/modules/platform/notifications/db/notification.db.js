@@ -34,7 +34,8 @@ const findNotificationsByUser = async (userId, filters = {}) => {
   if (organizationId) where.organizationId = organizationId;
   if (type) where.type = type;
   if (channel) where.channel = channel;
-  if (isRead !== undefined) where.isRead = isRead;
+  if (isRead === true) where.readAt = { not: null };
+  else if (isRead === false) where.readAt = null;
   if (productKey) where.productKey = productKey;
 
   const [items, total] = await Promise.all([
