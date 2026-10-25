@@ -39,7 +39,9 @@ const resolveCloseStatus = (variance, threshold) => {
 // Fire-and-forget: a notification failure must never block the close.
 const maybeNotifyVariance = (closedShift) => {
   if (closedShift && closedShift.status === 'CLOSED_PENDING_REVIEW') {
-    kxtillNotifications.notifyShiftVariance(closedShift).catch(() => {});
+    kxtillNotifications.notifyShiftVariance(closedShift).catch((e) => {
+      console.error('[shift.service] variance notification failed:', e.message);
+    });
   }
 };
 

@@ -33,18 +33,20 @@ import authorizationService from '../../authorization/services/authorization.ser
 export async function findUsersWithPermission(organizationId, permissionKey) {
   if (!organizationId || !permissionKey) return [];
 
-  const members = await orgDb.findMembersByOrganization(organizationId);
-  if (!Array.isArray(members) || members.length === 0) return [];
+  const memberships = await orgDb.findMembershipsByOrganization(organizationId);
+  if (!Array.isArray(memberships) || memberships.length === 0) return [];
 
   const results = await Promise.all(
-    members.map(async (m) => {
+    memberships.map(async (m) => {
+      const userId = m.user?.id;
+      if (!userId) return null;
       try {
         const ok = await authorizationService.checkPermission(
-          m.userId,
+          userId,
           organizationId,
           permissionKey
         );
-        return ok ? m.userId : null;
+        return ok ? userId : null;
       } catch {
         return null;
       }
