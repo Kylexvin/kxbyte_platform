@@ -60,5 +60,23 @@ router.post('/notifications/mark-all-read', notificationsController.markAllRead)
 router.post('/notifications/seed', notificationsController.seed);
 router.post('/devices/register', devicesController.register);
 router.delete('/devices/:token', devicesController.unregister);
-
+// TEMPORARY TEST ENDPOINT — remove after FCM is verified
+router.post('/devices/test-push', async (req, res) => {
+  try {
+    const ctx = req.mobileContext;
+    const pushService = (await import('../../../../platform/notifications/services/push.service.js')).default;
+    const result = await pushService.sendPushToUser(
+      ctx.user.id,
+      'kxtill',
+      {
+        title: 'Test push',
+        body: 'If you see this, the backend push pipeline works.',
+        data: { type: 'test', resource: '', resourceId: '' },
+      }
+    );
+    res.json({ ok: true, result });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 export default router;
