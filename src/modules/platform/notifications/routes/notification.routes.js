@@ -2,7 +2,7 @@
 
 import express from 'express';
 import notificationController from '../controllers/notification.controller.js';
-import devicesController from '../controllers/devices.controller.js';
+import devicesController from '../../../products/kxtill/mobile/controllers/devices.controller.js';
 import authMiddleware from '../../identity/middleware/auth.middleware.js';
 
 const router = express.Router();
