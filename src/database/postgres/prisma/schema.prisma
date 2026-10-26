@@ -21,6 +21,7 @@ model User {
   deletedAt         DateTime?
 
   pairingSessions  PairingSession[]
+  deviceTokens  DeviceToken[]
   ownedOrganizations Organization[] @relation("OrganizationOwner")
   memberships        Membership[]
   sentInvitations    Invitation[] @relation("InvitationSender")
@@ -492,6 +493,26 @@ model Notification {
   @@index([type])
   @@index([createdAt])
   @@map("notifications")
+}
+
+// ============================================================
+// DEVICE TOKENS (FCM)
+// ============================================================
+
+model DeviceToken {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productKey  String
+  token       String   @unique
+  platform    String
+  deviceLabel String?
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([userId, productKey])
+  @@index([productKey])
+  @@map("device_tokens")
 }
 
 // ============================================================

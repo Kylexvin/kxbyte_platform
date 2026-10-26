@@ -3,6 +3,7 @@
 import notificationDb from '../db/notification.db.js';
 import orgDb from '../../organizations/db/org.db.js';
 import { sendNotificationEmail } from '../../email/index.js';
+import pushService from './push.service.js';
 
 const send = async (data) => {
   const {
@@ -44,6 +45,28 @@ const send = async (data) => {
     } catch (error) {
       console.error('Failed to send notification email:', error.message);
     }
+  }
+
+  // Fan out to push (fire-and-forget). Push failures never break the
+  // in-app path — the row above is the source of truth. The push service
+  // logs and prunes dead tokens on its own.
+  if (productKey) {
+    pushService
+      .sendPushToUser(userId, productKey, {
+        title,
+        body: message,
+        data: {
+          type,
+          resource: resource || '',
+          resourceId: resourceId || '',
+        },
+      })
+      .catch((e) => {
+        console.error(
+          '[notification.service] push fan-out failed:',
+          e?.message || e
+        );
+      });
   }
 
   return notification;
