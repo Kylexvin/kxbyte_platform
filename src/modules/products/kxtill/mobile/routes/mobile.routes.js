@@ -18,6 +18,7 @@ import { attachContext } from '../common/context.js';
 import dashboardController from '../controllers/dashboard.controller.js';
 import branchesController from '../controllers/branches.controller.js';
 import notificationsController from '../controllers/notifications.controller.js';
+import devicesController from '../controllers/devices.controller.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -57,5 +58,7 @@ router.get('/notifications/:id', notificationsController.detail);
 router.patch('/notifications/:id/read', notificationsController.markRead);
 router.post('/notifications/mark-all-read', notificationsController.markAllRead);
 router.post('/notifications/seed', notificationsController.seed);
+router.post('/devices/register', devicesController.register);
+router.delete('/devices/:token', devicesController.unregister);
 
 export default router;
