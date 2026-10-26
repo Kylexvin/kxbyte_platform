@@ -1158,9 +1158,9 @@ const productNames = {
 const oauthLogin = async (req, res) => {
   const { email, password, client_id, redirect_uri, state } = req.body;
 
-if (!isValidClient(client_id) || !isAllowedRedirect(client_id, redirect_uri)) {
-  return res.status(400).send('Invalid client_id or redirect_uri');
-}
+  if (!isValidClient(client_id) || !isAllowedRedirect(client_id, redirect_uri)) {
+    return res.status(400).send('Invalid client_id or redirect_uri');
+  }
 
   try {
     const result = await authService.login(email, password, req);
@@ -1170,9 +1170,52 @@ if (!isValidClient(client_id) || !isAllowedRedirect(client_id, redirect_uri)) {
       redirectUri: redirect_uri,
     });
 
-    res.redirect(`${redirect_uri}?code=${code}${state ? `&state=${state}` : ''}`);
+    const target = `${redirect_uri}?code=${code}${state ? `&state=${state}` : ''}`;
+
+    // Mobile flow: the redirect_uri is a custom scheme (e.g. kxtill://).
+    // A raw 302 to a non-http scheme is blocked by the browser's CSP
+    // form-action rule. Serve a small HTML page on our own origin that
+    // hands off to the scheme via meta-refresh + an anchor fallback.
+    const isMobileRedirect = !/^https?:\/\//i.test(redirect_uri);
+
+    if (isMobileRedirect) {
+      return res.send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0;url=${target}">
+  <title>Connecting…</title>
+</head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;background:#0e0f13;color:#eceef2;text-align:center;padding:40px 20px">
+  <p style="font-size:16px;margin:0 0 12px">Connecting to KxTill Mobile…</p>
+  <p style="font-size:13px;color:#a3a5b0;margin:0 0 20px">
+    If nothing happens, tap the link below.
+  </p>
+  <p><a href="${target}" style="color:#d9a84e;text-decoration:none;font-weight:700">Open in app</a></p>
+</body>
+</html>`);
+    }
+
+    return res.redirect(target);
   } catch (error) {
-    res.redirect(`${AUTH_BASE_URL}/api/v1/auth/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=invalid_credentials`);
+    const errorTarget = `${AUTH_BASE_URL}/api/v1/auth/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=invalid_credentials`;
+
+    const isMobileRedirect = !/^https?:\/\//i.test(redirect_uri);
+    if (isMobileRedirect) {
+      return res.send(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0;url=${errorTarget}">
+  <title>Sign in failed</title>
+</head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;background:#0e0f13;color:#eceef2;text-align:center;padding:40px 20px">
+  <p style="font-size:16px;margin:0 0 12px">Sign in failed</p>
+  <p><a href="${errorTarget}" style="color:#d9a84e;text-decoration:none;font-weight:700">Try again</a></p>
+</body>
+</html>`);
+    }
+    return res.redirect(errorTarget);
   }
 };
 
