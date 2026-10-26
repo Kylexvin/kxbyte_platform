@@ -206,4 +206,31 @@ export async function sweepExpired() {
   return { removed: count };
 }
 
-export default { create, redeem, revoke, getStatus, sweepExpired };
+export async function listDevices(userId) {
+  const [active, pending] = await Promise.all([
+    pairingDb.findActiveDevicesByUser(userId),
+    pairingDb.findPendingByUser(userId),
+  ]);
+
+  return {
+    devices: active.map((d) => ({
+      id: d.id,
+      label: d.deviceLabel || 'Mobile device',
+      userAgent: d.userAgent || null,
+      ipAddress: d.ipAddress || null,
+      pairedAt: d.usedAt,
+      organization: d.organization
+        ? { id: d.organization.id, name: d.organization.name }
+        : null,
+      branch: d.branch ? { id: d.branch.id, name: d.branch.name } : null,
+    })),
+    pending: pending.map((p) => ({
+      id: p.id,
+      label: p.deviceLabel || 'Pairing in progress',
+      expiresAt: p.expiresAt,
+      createdAt: p.createdAt,
+    })),
+  };
+}
+
+export default { create, redeem, revoke, getStatus, sweepExpired, listDevices };

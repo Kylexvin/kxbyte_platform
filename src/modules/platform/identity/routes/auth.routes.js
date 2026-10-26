@@ -53,6 +53,11 @@ router.get(
   authMiddleware.authenticate,
   pairingController.getStatus
 );
+router.get(
+  '/pairing/devices',
+  authMiddleware.authenticate,
+  pairingController.listDevices
+);
 
 // ============================================================
 // SSO (app-to-app single sign-on)

@@ -74,4 +74,20 @@ export async function getStatus(req, res) {
   }
 }
 
-export default { createSession, redeemSession, revokeSession, getStatus };
+
+export async function listDevices(req, res) {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ code: 'UNAUTHENTICATED', message: 'Sign in required' });
+    }
+    const result = await pairingService.listDevices(userId);
+    return res.json(result);
+  } catch (e) {
+    return mapError(res, e, 'Failed to list devices');
+  }
+}
+
+export default { createSession, redeemSession, revokeSession, getStatus, listDevices };

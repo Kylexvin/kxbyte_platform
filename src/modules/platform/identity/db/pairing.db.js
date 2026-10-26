@@ -50,6 +50,46 @@ const findById = async (id) => {
   return prisma.pairingSession.findUnique({ where: { id } });
 };
 
+
+const findActiveDevicesByUser = async (userId) => {
+  return prisma.pairingSession.findMany({
+    where: {
+      userId,
+      usedAt: { not: null },
+      revokedAt: null,
+    },
+    orderBy: { usedAt: 'desc' },
+    select: {
+      id: true,
+      deviceLabel: true,
+      userAgent: true,
+      ipAddress: true,
+      usedAt: true,
+      createdAt: true,
+      organization: { select: { id: true, name: true } },
+      branch: { select: { id: true, name: true } },
+    },
+  });
+};
+
+const findPendingByUser = async (userId) => {
+  return prisma.pairingSession.findMany({
+    where: {
+      userId,
+      usedAt: null,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      deviceLabel: true,
+      expiresAt: true,
+      createdAt: true,
+    },
+  });
+};
+
 export default {
   createSession,
   findByTokenHash,
@@ -57,4 +97,6 @@ export default {
   revoke,
   findById,
   deleteExpiredBefore,
+  findPendingByUser,
+  findActiveDevicesByUser ,
 };
