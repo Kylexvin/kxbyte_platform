@@ -624,10 +624,10 @@ const resetPassword = async (token, newPassword, req = null) => {
 const verifyEmail = async (token, req = null) => {
   const hashedToken = hashToken(token);
 
-  const verificationToken = await authDb.findUnusedVerificationTokenByType(
-    hashedToken,
-    TOKEN_TYPES.EMAIL_VERIFICATION
-  );
+const verificationToken = await authDb.findUnusedVerificationTokenByType(
+  hashedToken,
+  'EMAIL_VERIFICATION'
+);
 
   if (!verificationToken) {
     throw new Error('Invalid verification token');

@@ -579,6 +579,48 @@ const getBranchProductsForSync = async (req, res) => {
   }
 };
 
+const listInventoryProducts = async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+    const userId = req.user?.id ?? req.user?.userId ?? req.user?.sub;
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const {
+      search,
+      status,
+      type,
+      category,
+      includeArchived,
+      sort,
+      limit,
+      offset,
+    } = req.query;
+
+    const result = await productService.listProductsForMobile(
+      userId,
+      organizationId,
+      {
+        search: search?.trim() || undefined,
+        status: status || 'all',
+        type: type || 'all',
+        category: category || undefined,
+        includeArchived: includeArchived === 'true',
+        sort: sort || 'name_asc',
+        limit: limit ? Number(limit) : 20,
+        offset: offset ? Number(offset) : 0,
+      }
+    );
+
+    return res.json(result);
+  } catch (e) {
+    const statusCode = /permission|access/i.test(e.message) ? 403 : 400;
+    return res.status(statusCode).json({ message: e.message });
+  }
+};
+
 export default {
   createProduct,
   getProducts,
@@ -597,5 +639,5 @@ export default {
   updateBranchProduct,
   removeBranchProduct,
   generateUnitBarcode,
-
+  listInventoryProducts,
 }; 

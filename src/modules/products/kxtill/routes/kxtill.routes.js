@@ -176,6 +176,7 @@ router.get('/dashboard/today-sales-trend', guard, reportController.getTodaySales
 // MOBILE ROUTES
 // ============================================================
 router.use('/mobile', guard, mobileRoutes);
+router.get('/inventory/products', guard, productController.listInventoryProducts);
 
 
 // ============================================================

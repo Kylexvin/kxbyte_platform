@@ -19,6 +19,7 @@ import dashboardController from '../controllers/dashboard.controller.js';
 import branchesController from '../controllers/branches.controller.js';
 import notificationsController from '../controllers/notifications.controller.js';
 import devicesController from '../controllers/devices.controller.js';
+import teamController from '../controllers/team.controller.js';
 
 const router = express.Router({ mergeParams: true });
 
@@ -48,6 +49,10 @@ router.get('/branches/:branchId/stock', branchesController.getBranchStock);
 router.get('/branches/:branchId/shifts', branchesController.getBranchShifts);
 router.post('/branches/:branchId/shifts/:shiftId/review', branchesController.postReviewShift);
 router.post('/branches/:branchId/shifts/:shiftId/force-close', branchesController.postForceCloseShift);
+router.get('/branches/:branchId/team', teamController.getBranchTeam); 
+
+
+
 
 // ============================================================
 // NOTIFICATIONS

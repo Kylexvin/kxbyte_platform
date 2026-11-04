@@ -172,7 +172,29 @@ const getOrganizationProducts = async (organizationId, userId) => {
   }));
 };
 
-const activateProduct = async (organizationId, userId, productKey, vertical = 'retail') => {
+// ============================================================
+// ACTIVATION LOCK — serializes activate calls per org + product
+// so two concurrent requests can't both take the "new activation" path.
+// ============================================================
+const activationLocks = new Map();
+
+const withActivationLock = async (key, fn) => {
+  const prev = activationLocks.get(key) || Promise.resolve();
+  let release;
+  const next = new Promise((resolve) => (release = resolve));
+  const tail = prev.then(() => next);
+  activationLocks.set(key, tail);
+
+  try {
+    await prev;
+    return await fn();
+  } finally {
+    release();
+    if (activationLocks.get(key) === tail) activationLocks.delete(key);
+  }
+};
+
+const activateProductUnlocked = async (organizationId, userId, productKey, vertical = 'retail') => {
   if (productKey === 'admin') {
     throw new Error('Cannot activate internal platform product');
   }
@@ -232,7 +254,6 @@ const activateProduct = async (organizationId, userId, productKey, vertical = 'r
     };
   };
 
-  // Already active — return for any user
   // Already active — return for any user, but allow adding a new vertical instance
   if (existing && existing.isActive) {
     const instances = await productDb.findInstancesByOrganizationProduct(existing.id);
@@ -344,6 +365,12 @@ const activateProduct = async (organizationId, userId, productKey, vertical = 'r
   sendActivationEmail({ userId, organization, response }); // not awaited, so the API responds immediately
   return response;
 };
+
+// Public entry point 
+const activateProduct = (organizationId, userId, productKey, vertical = 'retail') =>
+  withActivationLock(`${organizationId}:${productKey}`, () =>
+    activateProductUnlocked(organizationId, userId, productKey, vertical)
+  );
 
 const deactivateProduct = async (organizationId, userId, productKey) => {
   const organization = await orgDb.findOrganizationById(organizationId);

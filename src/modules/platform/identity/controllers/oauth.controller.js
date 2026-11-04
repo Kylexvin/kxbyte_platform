@@ -42,6 +42,7 @@ import authDb from '../db/auth.db.js';
 import jwt from '../utils/jwt.js';
 import authService from '../services/auth.service.js';
 import authCodeStore from '../utils/authCodeStore.js';
+import { ERROR_CODES } from '../utils/errors.js';
 
 import { isValidClient, isAllowedRedirect } from '../utils/allowedRedirects.js';
 
@@ -511,9 +512,11 @@ const verifyEmailPage = async (req, res) => {
   res.send(html);
 };
 
+
 /**
  * POST /auth/verify-email/resend - Resend verification email
- * Requires an authenticated user OR a logged-out email lookup flow (your choice)
+ * Delegates to authService.resendVerification so tokens are invalidated
+ * consistently with /auth/resend-verification.
  */
 const resendVerificationEmail = async (req, res) => {
   const { email } = req.body;
@@ -523,30 +526,11 @@ const resendVerificationEmail = async (req, res) => {
   }
 
   try {
-    const user = await authDb.findActiveUserByEmail(email.toLowerCase().trim());
-
-    if (user && !user.isEmailVerified) {
-      const crypto = await import('crypto');
-      const rawToken = crypto.randomBytes(32).toString('hex');
-      const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
-
-      await authDb.createVerificationToken({
-        userId: user.id,
-        token: hashedToken,
-        type: 'EMAIL_VERIFICATION',
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
-      });
-
-      // Reuse whatever sends the email in auth.service
-      const emailService = await import('../../email/index.js');
-      await emailService.sendVerificationEmail(user.email, rawToken, user.firstName);
-    }
-
-    // Always return success (prevent enumeration)
-    res.json({ message: 'If that email is registered and unverified, a new link has been sent.' });
+    const result = await authService.resendVerification(email, req);
+    return res.json(result);
   } catch (err) {
     console.error('Resend verification error:', err.message);
-    res.status(500).json({ error: 'Failed to send verification email' });
+    return res.status(500).json({ error: 'Failed to send verification email' });
   }
 };
 
@@ -871,16 +855,19 @@ const productNames = {
 };
   const productName = productNames[client_id] || client_id;
 
-  const errorMessage = req.query.error === 'invalid_credentials' 
-    ? 'Invalid email or password' 
+const errorMessage =
+  req.query.error === 'invalid_credentials'
+    ? 'Invalid email or password'
+    : req.query.error === 'email_not_verified'
+    ? 'Your email is not verified yet. Check your inbox for the verification link, or use "Resend verification" below.'
     : req.query.error === 'registered'
-    ? 'Account created! Please sign in.'
+    ? 'Account created! Please verify your email, then sign in.'
     : req.query.error || '';
 
-  const successMessage = req.query.registered === 'true' 
-    ? 'Account created successfully! Please sign in.' 
+const successMessage =
+  req.query.registered === 'true'
+    ? 'Account created! Check your inbox for the verification link before signing in.'
     : '';
-
   const loginPage = `
     <!DOCTYPE html>
     <html>
@@ -1172,10 +1159,6 @@ const oauthLogin = async (req, res) => {
 
     const target = `${redirect_uri}?code=${code}${state ? `&state=${state}` : ''}`;
 
-    // Mobile flow: the redirect_uri is a custom scheme (e.g. kxtill://).
-    // A raw 302 to a non-http scheme is blocked by the browser's CSP
-    // form-action rule. Serve a small HTML page on our own origin that
-    // hands off to the scheme via meta-refresh + an anchor fallback.
     const isMobileRedirect = !/^https?:\/\//i.test(redirect_uri);
 
     if (isMobileRedirect) {
@@ -1198,7 +1181,13 @@ const oauthLogin = async (req, res) => {
 
     return res.redirect(target);
   } catch (error) {
-    const errorTarget = `${AUTH_BASE_URL}/api/v1/auth/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=invalid_credentials`;
+    // Distinguish the error type so the authorize page can show a meaningful message
+    let errorCode = 'invalid_credentials';
+    if (error.code === ERROR_CODES.EMAIL_NOT_VERIFIED) {
+      errorCode = 'email_not_verified';
+    }
+
+    const errorTarget = `${AUTH_BASE_URL}/api/v1/auth/oauth/authorize?client_id=${client_id}&redirect_uri=${encodeURIComponent(redirect_uri)}${state ? `&state=${state}` : ''}&error=${errorCode}${error.email ? `&email=${encodeURIComponent(error.email)}` : ''}`;
 
     const isMobileRedirect = !/^https?:\/\//i.test(redirect_uri);
     if (isMobileRedirect) {
@@ -1211,6 +1200,7 @@ const oauthLogin = async (req, res) => {
 </head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;background:#0e0f13;color:#eceef2;text-align:center;padding:40px 20px">
   <p style="font-size:16px;margin:0 0 12px">Sign in failed</p>
+  <p style="font-size:13px;color:#a3a5b0;margin:0 0 20px">${errorCode === 'email_not_verified' ? 'Please verify your email before signing in.' : 'Invalid email or password.'}</p>
   <p><a href="${errorTarget}" style="color:#d9a84e;text-decoration:none;font-weight:700">Try again</a></p>
 </body>
 </html>`);

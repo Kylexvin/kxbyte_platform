@@ -153,29 +153,6 @@ const createProduct = async (userId, organizationId, data) => {
   return completeProduct;
 };
 
-const getProducts = async (organizationId, userId, filters) => {
-  const membership = await orgDb.findMembership(userId, organizationId);
-  if (!membership) {
-    throw new Error('You do not have access to this organization');
-  }
-
-  return productDb.findProductsByOrganization(organizationId, filters);
-};
-
-const getProduct = async (organizationId, userId, productId) => {
-  const membership = await orgDb.findMembership(userId, organizationId);
-  if (!membership) {
-    throw new Error('You do not have access to this organization');
-  }
-
-  const product = await productDb.findProductById(productId, organizationId);
-  if (!product) {
-    throw new Error('Product not found');
-  }
-
-  return product;
-};
-
 const updateProduct = async (organizationId, userId, productId, data) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) {
@@ -272,6 +249,31 @@ const updateProduct = async (organizationId, userId, productId, data) => {
 
   return completeProduct;
 };
+
+const getProducts = async (organizationId, userId, filters) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  return productDb.findProductsByOrganization(organizationId, filters);
+};
+
+const getProduct = async (organizationId, userId, productId) => {
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const product = await productDb.findProductById(productId, organizationId);
+  if (!product) {
+    throw new Error('Product not found');
+  }
+
+  return product;
+};
+
+
 
 const deleteProduct = async (organizationId, userId, productId) => {
   const membership = await orgDb.findMembership(userId, organizationId);
@@ -400,7 +402,208 @@ const searchProducts = async (organizationId, userId, searchTerm, branchId, limi
   });
 };
 
+/* ════════════════════════════════════════════════════════════════
+   INVENTORY PRODUCTS — MOBILE LIST
+   ════════════════════════════════════════════════════════════════ */
 
+function stockStatusOf(branchProducts) {
+  const bps = branchProducts || [];
+  if (bps.length === 0) return 'no-branch';
+  const out = bps.filter((b) => Number(b.stock) <= 0).length;
+  const low = bps.filter(
+    (b) =>
+      Number(b.stock) > 0 && Number(b.stock) <= Number(b.minStock || 0)
+  ).length;
+  if (out === bps.length) return 'out-of-stock';
+  if (low + out === bps.length) return 'low-stock';
+  if (low + out > 0) return 'low-stock';
+  return 'in-stock';
+}
+
+function stockStatusLabel(status) {
+  switch (status) {
+    case 'out-of-stock':
+      return 'Out';
+    case 'low-stock':
+      return 'Low';
+    case 'no-branch':
+      return 'No branch';
+    default:
+      return 'OK';
+  }
+}
+
+function pickOrderBy(sort) {
+  switch (sort) {
+    case 'created_desc':
+      return { createdAt: 'desc' };
+    case 'name_desc':
+      return { name: 'desc' };
+    case 'name_asc':
+    default:
+      return { name: 'asc' };
+  }
+}
+
+const listProductsForMobile = async (userId, organizationId, opts = {}) => {
+  const {
+    search,
+    status = 'all',
+    type = 'all',
+    category,
+    includeArchived = false,
+    sort = 'name_asc',
+    limit = 20,
+    offset = 0,
+  } = opts;
+
+  const take = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const skip = Math.max(Number(offset) || 0, 0);
+
+  const membership = await orgDb.findMembership(userId, organizationId);
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+
+  const where = {
+    organizationId,
+    ...(includeArchived ? {} : { isActive: true }),
+    ...(category ? { category } : {}),
+    ...(search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { sku: { contains: search, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+    ...(type === 'medicine'
+      ? { pharmacyProduct: { isNot: null } }
+      : type === 'retail'
+        ? { pharmacyProduct: { is: null } }
+        : {}),
+  };
+
+  const all = await prisma.kxTillProduct.findMany({
+    where,
+    select: {
+      id: true,
+      name: true,
+      sku: true,
+      category: true,
+      isActive: true,
+      trackInventory: true,
+      cost: true,
+      pharmacyProduct: {
+        select: { genericName: true, strength: true, dosageForm: true },
+      },
+      branchProducts: {
+        select: {
+          branchId: true,
+          stock: true,
+          minStock: true,
+          isAvailable: true,
+          branch: { select: { name: true } },
+        },
+      },
+      baseUnit: {
+        select: {
+          id: true,
+          name: true,
+          abbreviation: true,
+          price: true,
+          cost: true,
+        },
+      },
+    },
+    orderBy: pickOrderBy(sort),
+  });
+
+  const normalized = all.map((p) => {
+    const unit = p.baseUnit || {};
+    const stockStatus = stockStatusOf(p.branchProducts);
+    return {
+      id: p.id,
+      name: p.name,
+      sku: p.sku || null,
+      category: p.category || null,
+      isActive: p.isActive !== false,
+      trackInventory: p.trackInventory !== false,
+      pharmacyProduct: p.pharmacyProduct
+        ? {
+            genericName: p.pharmacyProduct.genericName || null,
+            strength: p.pharmacyProduct.strength || null,
+            dosageForm: p.pharmacyProduct.dosageForm || null,
+          }
+        : null,
+      branchProducts: (p.branchProducts || []).map((b) => ({
+        branchId: b.branchId,
+        branchName: b.branch?.name || null,
+        stock: Number(b.stock || 0),
+        minStock: Number(b.minStock || 0),
+        isAvailable: b.isAvailable !== false,
+      })),
+      baseUnit: {
+        id: unit.id || null,
+        name: unit.name || null,
+        abbreviation: unit.abbreviation || 'units',
+        price: Number(unit.price || 0),
+        cost: Number(unit.cost || 0),
+      },
+      cost: Number(unit.cost || p.cost || 0),
+      price: Number(unit.price || 0),
+      totalStock: (p.branchProducts || []).reduce(
+        (s, b) => s + Number(b.stock || 0),
+        0
+      ),
+      stockStatus,
+      stockStatusLabel: stockStatusLabel(stockStatus),
+    };
+  });
+
+  const counts = {
+    all: normalized.length,
+    inStock: 0,
+    lowStock: 0,
+    outOfStock: 0,
+    archived: 0,
+    byCategory: {},
+    byType: { medicine: 0, retail: 0 },
+  };
+  for (const p of normalized) {
+    if (p.stockStatus === 'in-stock') counts.inStock++;
+    else if (p.stockStatus === 'low-stock') counts.lowStock++;
+    else if (p.stockStatus === 'out-of-stock') counts.outOfStock++;
+    if (!p.isActive) counts.archived++;
+    if (p.category) {
+      counts.byCategory[p.category] =
+        (counts.byCategory[p.category] || 0) + 1;
+    }
+    if (p.pharmacyProduct) counts.byType.medicine++;
+    else counts.byType.retail++;
+  }
+
+  const filtered =
+    status === 'in-stock'
+      ? normalized.filter((p) => p.stockStatus === 'in-stock')
+      : status === 'low-stock'
+        ? normalized.filter((p) => p.stockStatus === 'low-stock')
+        : status === 'out-of-stock'
+          ? normalized.filter((p) => p.stockStatus === 'out-of-stock')
+          : normalized;
+
+  const total = filtered.length;
+  const items = filtered.slice(skip, skip + take);
+
+  return {
+    items,
+    total,
+    limit: take,
+    offset: skip,
+    hasMore: skip + items.length < total,
+    counts,
+  };
+};
 
 
 // ============================================================
@@ -872,4 +1075,5 @@ export default {
   updateBranchProduct,
   removeBranchProduct,
   generateUnitBarcode,
+  listProductsForMobile,
 };

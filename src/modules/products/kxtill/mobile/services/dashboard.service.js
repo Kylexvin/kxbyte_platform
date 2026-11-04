@@ -33,7 +33,7 @@ const SHORTCUTS = [
     permission: 'branches.view',
   },
 ];
-
+ 
 const safe = async (fn, fallback = null) => {
   try {
     return await fn();
