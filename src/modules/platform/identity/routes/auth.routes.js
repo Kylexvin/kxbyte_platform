@@ -9,6 +9,7 @@ import passport from '../config/passport.config.js';
 import oauthController from '../controllers/oauth.controller.js';
 import ssoController from '../controllers/sso.controller.js';
 import pairingController from '../controllers/pairing.controller.js';
+import adminController from '../controllers/admin.controller.js';
 
 import {
   loginLimiter,
@@ -97,6 +98,7 @@ router.post('/resend-verification', passwordResetLimiter, authController.resendV
 
 router.get('/me', authMiddleware.authenticate, authController.getMe);
 router.get('/me/dashboard', authMiddleware.authenticate, dashboardController.getDashboardContext);
+router.get('/me/admin', authMiddleware.authenticate, adminController.getAdminContext);
 router.patch('/me', authMiddleware.authenticate, authController.updateProfile);
 router.post('/change-password', authMiddleware.authenticate, authController.changePassword);
 router.get('/sessions', authMiddleware.authenticate, sessionLimiter, authController.getSessions);

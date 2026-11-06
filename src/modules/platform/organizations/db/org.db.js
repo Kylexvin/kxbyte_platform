@@ -265,6 +265,12 @@ const getUserRole = async (userId, organizationId) => {
   return membership?.role?.name || null;
 };
 
+const countMembershipsByRole = async (roleId) => {
+  return prisma.membership.count({
+    where: { roleId, isActive: true },
+  });
+};
+
 // ============================================================
 // EXPORTS
 // ============================================================
@@ -288,6 +294,7 @@ export default {
   findMembershipsByUser,
   updateMembership,
   deleteMembership,
+  countMembershipsByRole,
 
   // User
   findUserById,

@@ -77,6 +77,7 @@ const createProduct = async (userId, organizationId, data) => {
       price: data.baseUnit.price,
       cost: data.baseUnit.cost || null,
       allowFractional: data.baseUnit.allowFractional || false,
+      barcode: data.baseUnit.barcode || null,
     });
     baseUnitId = baseUnit.id;
   }
@@ -92,6 +93,7 @@ const createProduct = async (userId, organizationId, data) => {
         price: unit.price,
         cost: unit.cost || null,
         allowFractional: unit.allowFractional || false,
+        barcode: unit.barcode || null,
       });
     }
   }

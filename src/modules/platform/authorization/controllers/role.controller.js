@@ -28,7 +28,52 @@ const createRole = async (req, res) => {
     if (error.message === 'A role with this name already exists') {
       return res.status(400).json({ error: error.message });
     }
+    if (error.message === 'This role name is reserved') {
+      return res.status(400).json({ error: error.message });
+    }
     console.error('Create role error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+const updateRole = async (req, res) => {
+  const validation = roleValidator.validateUpdateRole(req.body);
+  if (!validation.valid) {
+    return res.status(400).json({ errors: validation.errors });
+  }
+
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { organizationId, roleId } = req.params;
+    const role = await roleService.updateRole(organizationId, userId, roleId, req.body);
+    res.status(200).json({ role });
+  } catch (error) {
+    if (
+      error.message === 'Organization not found' ||
+      error.message === 'Role not found'
+    ) {
+      return res.status(404).json({ error: error.message });
+    }
+    if (
+      error.message === 'Only the organization owner can manage roles' ||
+      error.message === 'Role does not belong to this organization'
+    ) {
+      return res.status(403).json({ error: error.message });
+    }
+    if (error.message === 'A role with this name already exists') {
+      return res.status(400).json({ error: error.message });
+    }
+    if (
+      error.message === 'The platform_admin role cannot be modified' ||
+      error.message === 'The wildcard permission cannot be removed from this role'
+    ) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error('Update role error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -79,38 +124,6 @@ const getRole = async (req, res) => {
   }
 };
 
-const updateRole = async (req, res) => {
-  const validation = roleValidator.validateUpdateRole(req.body);
-  if (!validation.valid) {
-    return res.status(400).json({ errors: validation.errors });
-  }
-
-  try {
-    const userId = req.user?.userId;
-    if (!userId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { organizationId, roleId } = req.params;
-    const role = await roleService.updateRole(organizationId, userId, roleId, req.body);
-    res.status(200).json({ role });
-  } catch (error) {
-    if (error.message === 'Organization not found' ||
-        error.message === 'Role not found') {
-      return res.status(404).json({ error: error.message });
-    }
-    if (error.message === 'Only the organization owner can manage roles' ||
-        error.message === 'Role does not belong to this organization') {
-      return res.status(403).json({ error: error.message });
-    }
-    if (error.message === 'A role with this name already exists') {
-      return res.status(400).json({ error: error.message });
-    }
-    console.error('Update role error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-};
-
 const deleteRole = async (req, res) => {
   try {
     const userId = req.user?.userId;
@@ -122,13 +135,23 @@ const deleteRole = async (req, res) => {
     await roleService.deleteRole(organizationId, userId, roleId);
     res.status(200).json({ message: 'Role deleted successfully' });
   } catch (error) {
-    if (error.message === 'Organization not found' ||
-        error.message === 'Role not found') {
+    if (
+      error.message === 'Organization not found' ||
+      error.message === 'Role not found'
+    ) {
       return res.status(404).json({ error: error.message });
     }
-    if (error.message === 'Only the organization owner can manage roles' ||
-        error.message === 'Role does not belong to this organization') {
+    if (
+      error.message === 'Only the organization owner can manage roles' ||
+      error.message === 'Role does not belong to this organization'
+    ) {
       return res.status(403).json({ error: error.message });
+    }
+    if (
+      error.message.startsWith('Cannot delete a role assigned to') ||
+      error.message === 'The platform_admin role cannot be deleted'
+    ) {
+      return res.status(400).json({ error: error.message });
     }
     console.error('Delete role error:', error);
     res.status(500).json({ error: 'Internal server error' });
