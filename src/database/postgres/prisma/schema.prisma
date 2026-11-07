@@ -15,6 +15,10 @@ model User {
   lastName          String
   isEmailVerified   Boolean   @default(false)
   isActive          Boolean   @default(true)
+  verifiedAt        DateTime?
+  deactivatedAt     DateTime?
+  deactivatedBy     String?
+  deactivationReason  String?
   lastLoginAt       DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -58,6 +62,11 @@ model User {
   
   supportTickets          SupportTicket[] @relation("TicketReporter")
   assignedSupportTickets  SupportTicket[] @relation("TicketAssignee")
+
+  leadsAssigned  Lead[]         @relation("LeadAssigned")
+  leadsConverted Lead[]         @relation("LeadConvertedBy")
+
+  leadActivities LeadActivity[]
 
   @@map("users")
 }
@@ -143,6 +152,13 @@ model Organization {
   supportTickets SupportTicket[]
   kxtillTransfers KxTillTransfer[]
   customers Customer[]
+
+  pipelineStages PipelineStage[]
+
+  leadsOwned     Lead[]         @relation("LeadOwner")
+  leadsConverted Lead[]         @relation("LeadConversion")
+
+  leadActivities LeadActivity[]
 
   @@index([ownerId])
   @@index([isInternal])
@@ -1473,4 +1489,156 @@ model Subscriber {
 
   @@index([newsletter])
   @@map("subscribers")
+}
+
+
+
+
+
+
+//==================================================================
+//==================================================================
+//==================================================================
+//==================================================================
+//==================================================================
+//==================================================================
+//==================================================================
+//==================================================================
+
+//==KXCRM==
+
+
+// ============================================================
+// KxCRM — Shared CRM Domain
+//
+// Used by:
+//   - KXBYTE Admin CRM (internal acquisition)
+//   - Future KxCRM product (customer-facing)
+//
+// Isolation:
+//   - Every CRM entity belongs to an organization.
+//   - Leads can only reference stages in their organization.
+//   - Activities can only reference leads in their organization.
+//   - All service queries must enforce organizationId.
+// ============================================================
+
+model PipelineStage {
+  id             String   @id @default(uuid())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name           String
+  key            String
+  order          Int
+
+  isTerminal     Boolean  @default(false)
+  isWon          Boolean  @default(false)
+  isLost         Boolean  @default(false)
+
+  color          String?
+  isActive       Boolean  @default(true)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  leads          Lead[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, key])
+
+  @@index([organizationId, order])
+  @@index([organizationId, isActive])
+
+  @@map("pipeline_stages")
+}
+
+model Lead {
+  id                String   @id @default(uuid())
+
+  organizationId    String
+  organization      Organization @relation("LeadOwner", fields: [organizationId], references: [id], onDelete: Cascade)
+
+  businessName      String
+  businessCategory  String?
+
+  contactName       String
+  contactEmail      String?
+  contactPhone      String
+
+  location          String?
+  businessSize      String?
+  interestedProduct String?
+
+  source            String
+  sourceDetail      String?
+
+  stageId           String
+  stage             PipelineStage @relation(fields: [organizationId, stageId], references: [organizationId, id], onDelete: Restrict)
+
+  dealValue         Decimal? @db.Decimal(12, 2)
+  currency          String   @default("KES")
+
+  assignedToId      String?
+  assignedTo        User?    @relation("LeadAssigned", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  convertedOrganizationId String? @unique
+  convertedOrganization   Organization? @relation("LeadConversion", fields: [convertedOrganizationId], references: [id], onDelete: SetNull)
+
+  convertedAt      DateTime?
+  convertedById    String?
+  convertedBy      User? @relation("LeadConvertedBy", fields: [convertedById], references: [id], onDelete: SetNull)
+
+  lostReason       String?
+  lostAt           DateTime?
+
+  notes            String?  @db.Text
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  deletedAt        DateTime?
+
+  activities       LeadActivity[]
+
+  @@unique([organizationId, id])
+
+  @@index([organizationId, stageId])
+  @@index([organizationId, assignedToId])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, deletedAt])
+  @@index([organizationId, convertedOrganizationId])
+
+  @@map("leads")
+}
+
+model LeadActivity {
+  id               String   @id @default(uuid())
+
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  leadId           String
+  lead             Lead     @relation(fields: [organizationId, leadId], references: [organizationId, id], onDelete: Cascade)
+
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  type             String
+  summary          String
+  outcome          String?
+
+  nextStep         String?
+  nextStepDate     DateTime?
+
+  visitObjections    String?  @db.Text
+  visitDemoRequested Boolean @default(false)
+
+  metadata         Json?
+
+  createdAt        DateTime @default(now())
+
+  @@index([organizationId, leadId, createdAt])
+  @@index([organizationId, userId, createdAt])
+
+  @@map("lead_activities")
 }

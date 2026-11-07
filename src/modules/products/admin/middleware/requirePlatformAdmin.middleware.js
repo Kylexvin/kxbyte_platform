@@ -40,3 +40,29 @@ export const requirePlatformAdmin = (permissionKey) => {
     }
   };
 };
+
+export const hasPlatformPermission = (permissionKey) => {
+  return async (req, res, next) => {
+    try {
+      const userId = req.user?.userId;
+      if (!userId) return next();
+
+      const internalOrg = await orgDb.findOrganizationBySlug(KXBYTE_SLUG);
+      if (!internalOrg) return next();
+
+      const allowed = await authorizationService.checkPermission(
+        userId,
+        internalOrg.id,
+        permissionKey
+      );
+
+      req.platformPermissions = req.platformPermissions || {};
+      req.platformPermissions[permissionKey] = !!allowed;
+
+      next();
+    } catch (err) {
+      console.error('hasPlatformPermission error:', err);
+      next(); // soft — don't block
+    }
+  };
+};

@@ -1,7 +1,7 @@
 // src/modules/products/admin/routes/admin.routes.js
 import express from 'express';
 import authMiddleware from '../../../platform/identity/middleware/auth.middleware.js';
-import { requirePlatformAdmin } from '../middleware/requirePlatformAdmin.middleware.js';
+import { requirePlatformAdmin, hasPlatformPermission } from '../middleware/requirePlatformAdmin.middleware.js';
 
 import * as dashboard from '../controllers/dashboard.controller.js';
 import * as users from '../controllers/users.controller.js';
@@ -19,6 +19,8 @@ import roleDb from '../../../platform/authorization/db/role.db.js';
 
 import roleCtrl from '../../../platform/authorization/controllers/role.controller.js';
 import permissionDb from '../../../platform/authorization/db/permission.db.js';
+
+
 
 const router = express.Router();
 
@@ -50,8 +52,21 @@ router.get('/users',
   requirePlatformAdmin('admin.users.view'), users.list);
 
 router.get('/users/:userId',
-  requirePlatformAdmin('admin.users.view'), users.getOne);
+  requirePlatformAdmin('admin.users.view'),
+  hasPlatformPermission('admin.users.sessions.view'),
+  users.getOne);
 
+router.post('/users/:userId/deactivate',
+  requirePlatformAdmin('admin.users.manage'), users.deactivate);
+
+router.post('/users/:userId/reactivate',
+  requirePlatformAdmin('admin.users.manage'), users.reactivate);
+
+router.post('/users/:userId/resend-verification',
+  requirePlatformAdmin('admin.users.manage'), users.resendVerification);
+
+router.post('/users/:userId/force-logout',
+  requirePlatformAdmin('admin.users.manage'), users.forceLogout);
 // ============================================================
 // TEAM (kxbyte internal staff) — aliases over organization controllers
 // ============================================================
