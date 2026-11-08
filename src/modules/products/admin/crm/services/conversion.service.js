@@ -16,6 +16,11 @@
 //
 // Route-gated by admin.leads.convert.
 
+// TODO: Link-to-Organization flow is temporary. The proper conversion path
+// will come from the Onboarding module: customer signs up → creates their
+// org → onboarding links the Won lead. Until then, admin can link manually
+// here via POST /admin/crm/leads/:leadId/convert with { organizationId }.
+
 import prisma from '../../../../../database/postgres/prisma.js';
 import leadsService from '../../../kxcrm/services/leads.service.js';
 import audit from '../../../../platform/audit/index.js';
