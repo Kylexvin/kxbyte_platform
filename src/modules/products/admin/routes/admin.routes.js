@@ -20,7 +20,7 @@ import roleDb from '../../../platform/authorization/db/role.db.js';
 import roleCtrl from '../../../platform/authorization/controllers/role.controller.js';
 import permissionDb from '../../../platform/authorization/db/permission.db.js';
 
-
+import crmRoutes from '../crm/routes/crm.routes.js';
 
 const router = express.Router();
 
@@ -262,5 +262,13 @@ router.get('/products',
 
 router.get('/products/:key',
   requirePlatformAdmin('admin.organizations.view'), productsCtrl.getOne);
+
+
+// ============================================================
+// CRM (kxcrm product) - routes
+// ============================================================
+
+router.use('/crm', crmRoutes);
+
 
 export default router;

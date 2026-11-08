@@ -63,10 +63,12 @@ model User {
   supportTickets          SupportTicket[] @relation("TicketReporter")
   assignedSupportTickets  SupportTicket[] @relation("TicketAssignee")
 
-  leadsAssigned  Lead[]         @relation("LeadAssigned")
+  
   leadsConverted Lead[]         @relation("LeadConvertedBy")
 
   leadActivities LeadActivity[]
+  leadAssignments         LeadAssignee[]
+  assignedLeadAssignments LeadAssignee[] @relation("LeadAssigneeAssignedBy")
 
   @@map("users")
 }
@@ -159,6 +161,7 @@ model Organization {
   leadsConverted Lead[]         @relation("LeadConversion")
 
   leadActivities LeadActivity[]
+  leadAssignees    LeadAssignee[]
 
   @@index([ownerId])
   @@index([isInternal])
@@ -1579,8 +1582,6 @@ model Lead {
   dealValue         Decimal? @db.Decimal(12, 2)
   currency          String   @default("KES")
 
-  assignedToId      String?
-  assignedTo        User?    @relation("LeadAssigned", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   convertedOrganizationId String? @unique
   convertedOrganization   Organization? @relation("LeadConversion", fields: [convertedOrganizationId], references: [id], onDelete: SetNull)
@@ -1599,11 +1600,12 @@ model Lead {
   deletedAt        DateTime?
 
   activities       LeadActivity[]
+  assignees        LeadAssignee[]
 
   @@unique([organizationId, id])
 
   @@index([organizationId, stageId])
-  @@index([organizationId, assignedToId])
+  
   @@index([organizationId, createdAt])
   @@index([organizationId, deletedAt])
   @@index([organizationId, convertedOrganizationId])
@@ -1641,4 +1643,28 @@ model LeadActivity {
   @@index([organizationId, userId, createdAt])
 
   @@map("lead_activities")
+}
+
+model LeadAssignee {
+  id             String   @id @default(uuid())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  leadId         String
+  lead           Lead     @relation(fields: [organizationId, leadId], references: [organizationId, id], onDelete: Cascade)
+
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  assignedById   String?
+  assignedBy     User?    @relation("LeadAssigneeAssignedBy", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  createdAt      DateTime @default(now())
+
+  @@unique([leadId, userId])
+  @@index([organizationId, userId])
+  @@index([organizationId, leadId])
+
+  @@map("lead_assignees")
 }

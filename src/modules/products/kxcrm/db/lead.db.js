@@ -3,7 +3,7 @@
 import prisma from '../../../../database/postgres/prisma.js';
 
 // ============================================================
-// STAGE SELECT (shared between findMany and findByIdWithRelations)
+// SHARED SELECTS
 // ============================================================
 
 const stageSelect = {
@@ -24,14 +24,24 @@ const userSelect = {
   email: true,
 };
 
+const assigneesSelect = {
+  select: {
+    id: true,
+    createdAt: true,
+    assignedById: true,
+    user: { select: userSelect },
+    assignedBy: { select: userSelect },
+  },
+};
+
 // ============================================================
-// WHERE BUILDER (single source of truth for filters)
+// WHERE BUILDER
 // ============================================================
 
 const buildLeadWhere = (organizationId, filters = {}) => {
   const {
     stageId,
-    assignedToId,
+    assigneeId,
     search,
     source,
     hasConverted,
@@ -41,7 +51,13 @@ const buildLeadWhere = (organizationId, filters = {}) => {
   const where = { organizationId, deletedAt: null };
 
   if (stageId) where.stageId = stageId;
-  if (assignedToId) where.assignedToId = assignedToId;
+
+  // Assignee filter now targets the LeadAssignee relation.
+  // A lead "assigned to user X" if any LeadAssignee row matches.
+  if (assigneeId) {
+    where.assignees = { some: { userId: assigneeId } };
+  }
+
   if (source) where.source = source;
 
   if (typeof hasConverted === 'boolean') {
@@ -77,7 +93,7 @@ const buildOrderBy = (sortBy = 'createdAt', sortOrder = 'desc') => {
 };
 
 // ============================================================
-// LEADS
+// LEADS — CORE
 // ============================================================
 
 const create = async (data, tx = prisma) => {
@@ -95,7 +111,7 @@ const findByIdWithRelations = async (organizationId, leadId) => {
     where: { id: leadId, organizationId, deletedAt: null },
     include: {
       stage: { select: stageSelect },
-      assignedTo: { select: userSelect },
+      assignees: assigneesSelect,
       convertedOrganization: {
         select: { id: true, name: true, slug: true },
       },
@@ -114,7 +130,7 @@ const findMany = async (organizationId, filters = {}, pagination = {}) => {
       where,
       include: {
         stage: { select: stageSelect },
-        assignedTo: { select: userSelect },
+        assignees: assigneesSelect,
         convertedOrganization: {
           select: { id: true, name: true, slug: true },
         },
@@ -142,12 +158,11 @@ const update = async (organizationId, leadId, data, tx = prisma) => {
 
   if (result.count === 0) return null;
 
-  // Return the relation-included shape so PATCH responses match GET.
   return tx.lead.findFirst({
     where: { id: leadId, organizationId, deletedAt: null },
     include: {
       stage: { select: stageSelect },
-      assignedTo: { select: userSelect },
+      assignees: assigneesSelect,
       convertedOrganization: {
         select: { id: true, name: true, slug: true },
       },
@@ -179,6 +194,58 @@ const countByStage = async (organizationId) => {
   return map;
 };
 
+// ============================================================
+// LEAD ASSIGNEES
+// ============================================================
+
+const listAssignees = async (organizationId, leadId) => {
+  return prisma.leadAssignee.findMany({
+    where: { organizationId, leadId },
+    include: {
+      user: { select: userSelect },
+      assignedBy: { select: userSelect },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+};
+
+const addAssignee = async (organizationId, leadId, userId, assignedById, tx = prisma) => {
+  // Use upsert to be idempotent: adding the same user twice is a no-op.
+  const existing = await tx.leadAssignee.findUnique({
+    where: { leadId_userId: { leadId, userId } },
+    select: { id: true },
+  });
+  if (existing) {
+    return tx.leadAssignee.findUnique({
+      where: { id: existing.id },
+      include: {
+        user: { select: userSelect },
+        assignedBy: { select: userSelect },
+      },
+    });
+  }
+
+  return tx.leadAssignee.create({
+    data: {
+      organizationId,
+      leadId,
+      userId,
+      assignedById: assignedById || null,
+    },
+    include: {
+      user: { select: userSelect },
+      assignedBy: { select: userSelect },
+    },
+  });
+};
+
+const removeAssignee = async (organizationId, leadId, userId, tx = prisma) => {
+  const result = await tx.leadAssignee.deleteMany({
+    where: { organizationId, leadId, userId },
+  });
+  return result.count;
+};
+
 export default {
   create,
   findById,
@@ -188,4 +255,7 @@ export default {
   update,
   softDelete,
   countByStage,
+  listAssignees,
+  addAssignee,
+  removeAssignee,
 };

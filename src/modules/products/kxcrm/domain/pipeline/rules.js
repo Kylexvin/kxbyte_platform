@@ -7,9 +7,9 @@
 
 import {
   ValidationError,
-  ForbiddenError,
   ConflictError,
 } from '../errors.js';
+
 // ============================================================
 // KEY FORMAT
 // ============================================================
@@ -29,12 +29,8 @@ export const assertValidKeyFormat = (key) => {
 // WON / LOST UNIQUENESS
 // ============================================================
 
-// stages: all existing stages in the org (active or inactive).
-// excludeStageId: stage being updated — skip it in the check.
 export const assertSingleWonStage = (stages, { excludeStageId } = {}) => {
-  const existing = stages.find(
-    (s) => s.isWon && s.id !== excludeStageId
-  );
+  const existing = stages.find((s) => s.isWon && s.id !== excludeStageId);
   if (existing) {
     throw new ValidationError(
       'WON_STAGE_EXISTS',
@@ -44,9 +40,7 @@ export const assertSingleWonStage = (stages, { excludeStageId } = {}) => {
 };
 
 export const assertSingleLostStage = (stages, { excludeStageId } = {}) => {
-  const existing = stages.find(
-    (s) => s.isLost && s.id !== excludeStageId
-  );
+  const existing = stages.find((s) => s.isLost && s.id !== excludeStageId);
   if (existing) {
     throw new ValidationError(
       'LOST_STAGE_EXISTS',
@@ -59,8 +53,6 @@ export const assertSingleLostStage = (stages, { excludeStageId } = {}) => {
 // TERMINAL CONSISTENCY
 // ============================================================
 
-// isTerminal is derived: must equal (isWon || isLost).
-// Called by the service just before persist.
 export const assertTerminalConsistency = ({ isWon, isLost, isTerminal }) => {
   const expected = !!(isWon || isLost);
   if (isTerminal !== expected) {
@@ -75,8 +67,6 @@ export const assertTerminalConsistency = ({ isWon, isLost, isTerminal }) => {
 // DISABLE / DELETE GUARDS
 // ============================================================
 
-// A stage can be disabled (isActive: false) unless leads still sit in it.
-// Strict: any lead in any stage blocks disable. Forces explicit reassign.
 export const assertCanDisableStage = (stage, leadCount) => {
   if (leadCount === 0) return;
 
@@ -98,9 +88,6 @@ export const assertCanDisableStage = (stage, leadCount) => {
   );
 };
 
-// Delete guard:
-//   - any lead in stage → refuse
-//   - Won/Lost stage → refuse (even if empty; it's the anchor)
 export const assertCanDeleteStage = (stage, leadCount, { wonStage, lostStage } = {}) => {
   if (leadCount > 0) {
     throw new ValidationError(
@@ -124,44 +111,61 @@ export const assertCanDeleteStage = (stage, leadCount, { wonStage, lostStage } =
 };
 
 // ============================================================
-// MOVE GUARD — moving a LEAD between stages
+// MOVE GUARD — moving a LEAD between NON-TERMINAL stages
 // ============================================================
 //
-// What this function decides: whether a target stage is a legal destination
-// for a lead move RIGHT NOW, based on the target's state and the caller's
-// permission result. It does NOT care which stage the lead is currently in.
+// `moveLeadToStage` handles moves between non-terminal stages only.
+// Moving INTO Won is a distinct operation handled by `promoteLeadToWon`
+// and gated by admin.leads.convert at the route layer.
 //
 // What's allowed (backwards drags are legitimate):
 //   - Won  → Negotiation      ✅  (mark Won by mistake, drag back)
 //   - Lost → Qualified        ✅  ("reopen" a lost lead)
-//   - Negotiation → Won       ✅  IF caller has crm.leads.convert
 //   - Any  → Lost             ✅  IF payload includes lostReason (service-enforced)
-//   - Any  → Any active stage ✅  (no forward/backward distinction at the rule level)
+//   - Any  → Any active non-Won stage ✅
 //
-// What's blocked:
-//   - Any  → disabled stage           → ValidationError CANT_MOVE_TO_DISABLED_STAGE
-//   - Any  → Won without permission   → ForbiddenError   REQUIRES_CONVERT_PERMISSION
+// What's blocked here:
+//   - Any  → disabled stage           → CANT_MOVE_TO_DISABLED_STAGE
+//   - Any  → Won (use promote route)  → USE_PROMOTE_ENDPOINT
 //
 // Side effects the SERVICE (not this rule) must apply on a move:
 //   - Target is Lost: set lostAt = now, lostReason from payload (required).
 //   - Target is NOT Lost: clear lostAt = null, lostReason = null
-//     (so a Lost → Negotiation drag doesn't leave stale "lost" data).
-//   - Target is Won and lead was NOT previously Won: leave for the
-//     separate convert flow (see assertNotConverted below).
-//
-// canConvert: boolean — service must call context.can('crm.leads.convert')
-//             and pass the result in. Domain stays pure.
-export const assertCanMoveToStage = (targetStage, { canConvert } = {}) => {
+export const assertCanMoveToStage = (targetStage) => {
   if (!targetStage.isActive) {
     throw new ValidationError(
       'CANT_MOVE_TO_DISABLED_STAGE',
       'Cannot move a lead to a disabled stage'
     );
   }
-  if (targetStage.isWon && !canConvert) {
-    throw new ForbiddenError(
-      'REQUIRES_CONVERT_PERMISSION',
-      'You do not have permission to move leads into the Won stage'
+  if (targetStage.isWon) {
+    throw new ValidationError(
+      'USE_PROMOTE_ENDPOINT',
+      'Use the promote endpoint to move a lead into the Won stage'
+    );
+  }
+};
+
+// ============================================================
+// PROMOTE GUARD — moving a LEAD into the Won stage
+// ============================================================
+//
+// Called by `promoteLeadToWon`. Route-gated by admin.leads.convert.
+//
+// What's blocked here:
+//   - target is not a Won stage  → NOT_WON_STAGE
+//   - target is disabled         → CANT_MOVE_TO_DISABLED_STAGE
+export const assertCanPromoteToWon = (targetStage) => {
+  if (!targetStage.isWon) {
+    throw new ValidationError(
+      'NOT_WON_STAGE',
+      'The promote endpoint only moves leads into the Won stage'
+    );
+  }
+  if (!targetStage.isActive) {
+    throw new ValidationError(
+      'CANT_MOVE_TO_DISABLED_STAGE',
+      'Cannot move a lead to a disabled stage'
     );
   }
 };
@@ -169,15 +173,7 @@ export const assertCanMoveToStage = (targetStage, { canConvert } = {}) => {
 // ============================================================
 // CONVERTED-LEAD LOCK
 // ============================================================
-//
-// Once a lead has been converted into an Organization, it becomes a
-// historical record. Moving it to another stage, or trying to convert
-// it again, is blocked here.
-//
-// Rationale: a converted lead points at a real Organization row via
-// convertedOrganizationId. Its stage is frozen at Won. If you want to
-// "undo," that's an org-archive operation on the Organization, not a
-// lead mutation.
+
 export const assertNotConverted = (lead) => {
   if (lead?.convertedOrganizationId) {
     throw new ConflictError(
@@ -191,17 +187,6 @@ export const assertNotConverted = (lead) => {
 // REORDER GUARD
 // ============================================================
 
-// updates: [{ id, order }]
-// existing: full stage list for the org (active or inactive)
-//
-// Enforces:
-//   1. Completeness — every existing stage must be present in updates,
-//      and updates must not contain extras. Otherwise a partial reorder
-//      can renumber some stages and leave others colliding on the same
-//      order value. The client always has the full list; require it.
-//   2. Membership — every id belongs to the org.
-//   3. Order validity — non-negative integers.
-//   4. No duplicate order values across updates.
 export const assertValidReorder = (updates, existing) => {
   if (updates.length !== existing.length) {
     throw new ValidationError(

@@ -1,16 +1,11 @@
 // src/modules/products/kxcrm/services/pipeline.service.js
 //
-// Engine service for pipeline stages.
-// Signature convention: (userId, organizationId, ...args) — matches
-// the rest of the platform's product services.
-//
-// Permissions: crm.pipeline.view, crm.pipeline.manage.
-// Templates are the surface's concern (admin/crm today, KxCRM later);
-// this service has no knowledge of any specific stage list.
+// Engine service for pipeline stages. Signature: (userId, organizationId, ...).
+// Permissions enforced at the route layer. No internal permission checks.
+// Templates are the surface's concern; this service has none.
 
 import pipelineDb from '../db/pipeline.db.js';
 import audit from '../../../platform/audit/index.js';
-import authorizationService from '../../../platform/authorization/services/authorization.service.js';
 import {
   assertValidKeyFormat,
   assertSingleWonStage,
@@ -23,40 +18,23 @@ import {
 import {
   ValidationError,
   NotFoundError,
-  ForbiddenError,
 } from '../domain/errors.js';
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-const assertPermission = async (userId, organizationId, key, message) => {
-  const ok = await authorizationService.checkPermission(userId, organizationId, key);
-  if (!ok) throw new ForbiddenError('FORBIDDEN', message);
-};
 
 // ============================================================
 // LIST / STATUS
 // ============================================================
 
 const listStages = async (userId, organizationId, { includeInactive = false } = {}) => {
-  await assertPermission(userId, organizationId, 'crm.pipeline.view', 'You do not have permission to view the pipeline');
   return pipelineDb.findByOrg(organizationId, { includeInactive });
 };
 
 const getStage = async (userId, organizationId, stageId) => {
-  await assertPermission(userId, organizationId, 'crm.pipeline.view', 'You do not have permission to view the pipeline');
   const stage = await pipelineDb.findById(organizationId, stageId);
   if (!stage) throw new NotFoundError('STAGE_NOT_FOUND', 'Stage not found');
   return stage;
 };
 
-// { isReady, wonStageId, lostStageId }
-// isReady = exactly one Won and one Lost are configured (any active state).
-// The engine uses this to gate lead creation.
 const getStatus = async (userId, organizationId) => {
-  await assertPermission(userId, organizationId, 'crm.pipeline.view', 'You do not have permission to view the pipeline');
-
   const won = await pipelineDb.findWonStage(organizationId);
   const lost = await pipelineDb.findLostStage(organizationId);
 
@@ -74,16 +52,12 @@ const getStatus = async (userId, organizationId) => {
 // ============================================================
 
 const createStage = async (userId, organizationId, payload) => {
-  await assertPermission(userId, organizationId, 'crm.pipeline.manage', 'You do not have permission to manage the pipeline');
-
   assertValidKeyFormat(payload.key);
 
   if (await pipelineDb.existsByKey(organizationId, payload.key)) {
     throw new ValidationError('KEY_EXISTS', `Stage key '${payload.key}' already exists in this organization`);
   }
 
-  // Uniqueness is enforced across ACTIVE stages only.
-  // Inactive Won/Lost stubs coexist with the active one; they're history.
   const activeStages = await pipelineDb.findByOrg(organizationId, { includeInactive: false });
   if (payload.isWon) assertSingleWonStage(activeStages);
   if (payload.isLost) assertSingleLostStage(activeStages);
@@ -111,12 +85,7 @@ const createStage = async (userId, organizationId, payload) => {
     action: 'PIPELINE_STAGE_CREATED',
     resource: 'pipeline_stage',
     resourceId: stage.id,
-    metadata: {
-      name: stage.name,
-      key: stage.key,
-      isWon: stage.isWon,
-      isLost: stage.isLost,
-    },
+    metadata: { name: stage.name, key: stage.key, isWon: stage.isWon, isLost: stage.isLost },
   });
 
   return stage;
@@ -127,8 +96,6 @@ const createStage = async (userId, organizationId, payload) => {
 // ============================================================
 
 const updateStage = async (userId, organizationId, stageId, payload) => {
-  await assertPermission(userId, organizationId, 'crm.pipeline.manage', 'You do not have permission to manage the pipeline');
-
   const stage = await pipelineDb.findById(organizationId, stageId);
   if (!stage) throw new NotFoundError('STAGE_NOT_FOUND', 'Stage not found');
 
@@ -138,7 +105,6 @@ const updateStage = async (userId, organizationId, stageId, payload) => {
     if (clash) throw new ValidationError('KEY_EXISTS', `Stage key '${payload.key}' already exists`);
   }
 
-  // Compute what the stage will look like after the update.
   const nextIsWon = payload.isWon !== undefined ? !!payload.isWon : stage.isWon;
   const nextIsLost = payload.isLost !== undefined ? !!payload.isLost : stage.isLost;
   const nextIsActive = payload.isActive !== undefined ? !!payload.isActive : stage.isActive;
@@ -146,12 +112,10 @@ const updateStage = async (userId, organizationId, stageId, payload) => {
 
   assertTerminalConsistency({ isWon: nextIsWon, isLost: nextIsLost, isTerminal: nextIsTerminal });
 
-  // Uniqueness over active stages only (inactive stubs are history).
   const activeStages = await pipelineDb.findByOrg(organizationId, { includeInactive: false });
   if (nextIsWon && !stage.isWon) assertSingleWonStage(activeStages, { excludeStageId: stageId });
   if (nextIsLost && !stage.isLost) assertSingleLostStage(activeStages, { excludeStageId: stageId });
 
-  // Disable guard: if we're setting isActive → false, no leads may sit in this stage.
   if (stage.isActive && nextIsActive === false) {
     const leadCount = await pipelineDb.countLeadsInStage(organizationId, stageId);
     assertCanDisableStage({ ...stage, isWon: nextIsWon, isLost: nextIsLost }, leadCount);
@@ -165,8 +129,6 @@ const updateStage = async (userId, organizationId, stageId, payload) => {
   if (payload.isWon !== undefined)    update.isWon = nextIsWon;
   if (payload.isLost !== undefined)   update.isLost = nextIsLost;
   if (payload.isActive !== undefined) update.isActive = nextIsActive;
-
-  // isTerminal is derived; only write when isWon/isLost actually changed.
   if (payload.isWon !== undefined || payload.isLost !== undefined) {
     update.isTerminal = nextIsTerminal;
   }
@@ -183,10 +145,7 @@ const updateStage = async (userId, organizationId, stageId, payload) => {
     action: 'PIPELINE_STAGE_UPDATED',
     resource: 'pipeline_stage',
     resourceId: stageId,
-    metadata: {
-      name: updated.name,
-      updatedFields: Object.keys(update),
-    },
+    metadata: { name: updated.name, updatedFields: Object.keys(update) },
   });
 
   return updated;
@@ -197,8 +156,6 @@ const updateStage = async (userId, organizationId, stageId, payload) => {
 // ============================================================
 
 const reorderStages = async (userId, organizationId, updates) => {
-  await assertPermission(userId, organizationId, 'crm.pipeline.manage', 'You do not have permission to manage the pipeline');
-
   if (!Array.isArray(updates) || updates.length === 0) {
     throw new ValidationError('INVALID_REORDER_PAYLOAD', 'Reorder payload must be a non-empty array of { id, order }');
   }
@@ -214,10 +171,7 @@ const reorderStages = async (userId, organizationId, updates) => {
     action: 'PIPELINE_STAGES_REORDERED',
     resource: 'pipeline',
     resourceId: null,
-    metadata: {
-      count: updates.length,
-      order: updates.map((u) => ({ id: u.id, order: u.order })),
-    },
+    metadata: { count: updates.length, order: updates.map((u) => ({ id: u.id, order: u.order })) },
   });
 
   return result;
@@ -228,14 +182,10 @@ const reorderStages = async (userId, organizationId, updates) => {
 // ============================================================
 
 const deleteStage = async (userId, organizationId, stageId) => {
-  await assertPermission(userId, organizationId, 'crm.pipeline.manage', 'You do not have permission to manage the pipeline');
-
   const stage = await pipelineDb.findById(organizationId, stageId);
   if (!stage) throw new NotFoundError('STAGE_NOT_FOUND', 'Stage not found');
 
   const leadCount = await pipelineDb.countLeadsInStage(organizationId, stageId);
-  // Only an ACTIVE Won/Lost blocks deletion. Inactive stubs can be
-  // cleaned up (as long as no leads sit in them).
   const wonStage = await pipelineDb.findActiveWonStage(organizationId);
   const lostStage = await pipelineDb.findActiveLostStage(organizationId);
 
@@ -250,10 +200,7 @@ const deleteStage = async (userId, organizationId, stageId) => {
     action: 'PIPELINE_STAGE_DELETED',
     resource: 'pipeline_stage',
     resourceId: stageId,
-    metadata: {
-      name: stage.name,
-      key: stage.key,
-    },
+    metadata: { name: stage.name, key: stage.key },
   });
 
   return { message: 'Stage deleted' };

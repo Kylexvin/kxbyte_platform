@@ -1,7 +1,7 @@
 // src/modules/products/kxcrm/services/leads.service.js
 //
-// Engine service for leads. Signature convention: (userId, organizationId, ...).
-// Permissions: crm.leads.*.
+// Engine service for leads. Signature: (userId, organizationId, ...).
+// Permissions enforced at the route layer. No internal permission checks.
 //
 // Leads convert to Organization rows, never to platform/customers.
 
@@ -10,31 +10,21 @@ import leadDb from '../db/lead.db.js';
 import pipelineDb from '../db/pipeline.db.js';
 import activitiesService from './activities.service.js';
 import audit from '../../../platform/audit/index.js';
-import authorizationService from '../../../platform/authorization/services/authorization.service.js';
 import orgDb from '../../../platform/organizations/db/org.db.js';
 import {
   assertLeadCreatePayload,
   assertLeadUpdatePayload,
 } from '../domain/leads/validation.js';
-import {
-  assertCanMoveToStage,
-  assertNotConverted,
-} from '../domain/pipeline/rules.js';
+import { assertNotConverted } from '../domain/pipeline/rules.js';
 import {
   ValidationError,
   NotFoundError,
-  ForbiddenError,
   ConflictError,
 } from '../domain/errors.js';
 
 // ============================================================
 // HELPERS
 // ============================================================
-
-const assertPermission = async (userId, organizationId, key, message) => {
-  const ok = await authorizationService.checkPermission(userId, organizationId, key);
-  if (!ok) throw new ForbiddenError('FORBIDDEN', message);
-};
 
 const loadLeadOrThrow = async (organizationId, leadId) => {
   const lead = await leadDb.findById(organizationId, leadId);
@@ -49,47 +39,59 @@ const assertAssigneeValid = async (organizationId, userId) => {
   }
 };
 
+// Block user activity when the lead has reached a terminal stage.
+// Won and Lost are both read-only for user-supplied activities;
+// only system events (STAGE_CHANGE, conversion NOTE) may still appear.
+const assertActivityAllowed = (lead) => {
+  if (lead?.stage?.isWon) {
+    throw new ValidationError(
+      'LEAD_WON_READONLY',
+      'This lead is Won. No new activities can be logged.'
+    );
+  }
+  if (lead?.stage?.isLost) {
+    throw new ValidationError(
+      'LEAD_LOST_READONLY',
+      'This lead is Lost. No new activities can be logged.'
+    );
+  }
+};
+
 // ============================================================
 // LIST / DETAIL
 // ============================================================
 
 const listLeads = async (userId, organizationId, filters = {}, pagination = {}) => {
-  await assertPermission(userId, organizationId, 'crm.leads.view', 'You do not have permission to view leads');
   return leadDb.findMany(organizationId, filters, pagination);
 };
 
 const getLead = async (userId, organizationId, leadId) => {
-  await assertPermission(userId, organizationId, 'crm.leads.view', 'You do not have permission to view leads');
   const lead = await leadDb.findByIdWithRelations(organizationId, leadId);
   if (!lead) throw new NotFoundError('LEAD_NOT_FOUND', 'Lead not found');
   return lead;
 };
 
 // ============================================================
-// CREATE
+// CREATE (accepts assignedToIds: string[])
 // ============================================================
 
 const createLead = async (userId, organizationId, payload) => {
-  await assertPermission(userId, organizationId, 'crm.leads.create', 'You do not have permission to create leads');
-
   assertLeadCreatePayload(payload);
 
-  // Pipeline must be ready (exactly one active Won and one active Lost).
   const won = await pipelineDb.findActiveWonStage(organizationId);
-  const lost = await pipelineDb.findActiveLostStage(organizationId);
-  if (!won || !lost) {
-    throw new ValidationError(
-      'PIPELINE_NOT_READY',
-      'Pipeline must have one active Won and one active Lost stage before leads can be created'
-    );
+  if (!won) {
+    throw new ValidationError('PIPELINE_NOT_READY', 'Pipeline must have an active Won stage before leads can be created');
   }
 
   const stage = await pipelineDb.findById(organizationId, payload.stageId);
   if (!stage) throw new ValidationError('STAGE_NOT_IN_ORG', 'Stage does not belong to this organization');
   if (!stage.isActive) throw new ValidationError('STAGE_DISABLED', 'Cannot create a lead in a disabled stage');
 
-  if (payload.assignedToId) {
-    await assertAssigneeValid(organizationId, payload.assignedToId);
+  const assigneeIds = Array.isArray(payload.assignedToIds)
+    ? Array.from(new Set(payload.assignedToIds.filter(Boolean)))
+    : [];
+  for (const uid of assigneeIds) {
+    await assertAssigneeValid(organizationId, uid);
   }
 
   const lead = await leadDb.create({
@@ -107,7 +109,6 @@ const createLead = async (userId, organizationId, payload) => {
     stageId: stage.id,
     dealValue: payload.dealValue ?? null,
     currency: payload.currency ?? 'KES',
-    assignedToId: payload.assignedToId ?? null,
     notes: payload.notes ?? null,
   });
 
@@ -117,6 +118,22 @@ const createLead = async (userId, organizationId, payload) => {
     summary: `Lead created in stage '${stage.name}'`,
     metadata: { to: stage.id, toName: stage.name },
   });
+
+  // Add initial assignees (if any).
+  if (assigneeIds.length > 0) {
+    for (const uid of assigneeIds) {
+      await leadDb.addAssignee(organizationId, lead.id, uid, userId);
+    }
+
+    await audit.log({
+      organizationId,
+      userId,
+      action: 'LEAD_ASSIGNED',
+      resource: 'lead',
+      resourceId: lead.id,
+      metadata: { assignedToIds: assigneeIds, initial: true },
+    });
+  }
 
   await audit.log({
     organizationId,
@@ -131,25 +148,20 @@ const createLead = async (userId, organizationId, payload) => {
 };
 
 // ============================================================
-// UPDATE (non-stage fields only)
+// UPDATE (no assignment, no stage; those have dedicated endpoints)
 // ============================================================
 
 const updateLead = async (userId, organizationId, leadId, payload) => {
-  await assertPermission(userId, organizationId, 'crm.leads.edit', 'You do not have permission to edit leads');
-
-  const lead = await loadLeadOrThrow(organizationId, leadId);
+  const lead = await leadDb.findByIdWithRelations(organizationId, leadId);
+  if (!lead) throw new NotFoundError('LEAD_NOT_FOUND', 'Lead not found');
   assertNotConverted(lead);
 
   assertLeadUpdatePayload(payload);
 
-  if (payload.assignedToId) {
-    await assertAssigneeValid(organizationId, payload.assignedToId);
-  }
-
   const allowed = [
     'businessName', 'businessCategory', 'contactName', 'contactEmail',
     'contactPhone', 'location', 'businessSize', 'interestedProduct',
-    'source', 'sourceDetail', 'dealValue', 'currency', 'assignedToId', 'notes',
+    'source', 'sourceDetail', 'dealValue', 'currency', 'notes',
   ];
   const update = {};
   for (const k of allowed) {
@@ -179,12 +191,10 @@ const updateLead = async (userId, organizationId, leadId, payload) => {
 };
 
 // ============================================================
-// STAGE MOVE
+// STAGE MOVE (non-terminal stages only)
 // ============================================================
 
 const moveLeadToStage = async (userId, organizationId, leadId, stageId, { lostReason } = {}) => {
-  await assertPermission(userId, organizationId, 'crm.leads.change_stage', 'You do not have permission to change lead stage');
-
   const lead = await loadLeadOrThrow(organizationId, leadId);
   assertNotConverted(lead);
 
@@ -195,17 +205,21 @@ const moveLeadToStage = async (userId, organizationId, leadId, stageId, { lostRe
   const target = await pipelineDb.findById(organizationId, stageId);
   if (!target) throw new ValidationError('STAGE_NOT_IN_ORG', 'Target stage does not belong to this organization');
 
-  // Active-only + convert permission (checked here, passed to pure rule).
-  const canConvert = target.isWon
-    ? await authorizationService.checkPermission(userId, organizationId, 'crm.leads.convert')
-    : true;
-  assertCanMoveToStage(target, { canConvert });
+  if (!target.isActive) {
+    throw new ValidationError('CANT_MOVE_TO_DISABLED_STAGE', 'Cannot move a lead to a disabled stage');
+  }
+  if (target.isWon) {
+    throw new ValidationError('USE_PROMOTE_ENDPOINT', 'Use POST /leads/:id/won to move a lead into the Won stage');
+  }
 
-  // Lost requires reason; non-lost clears lost fields.
   const isLost = !!target.isLost;
   if (isLost && (!lostReason || !String(lostReason).trim())) {
     throw new ValidationError('LOST_REASON_REQUIRED', 'lostReason is required when moving a lead to the Lost stage');
   }
+
+  const fromStage = lead.stageId
+    ? await pipelineDb.findById(organizationId, lead.stageId)
+    : null;
 
   const updateData = {
     stageId: target.id,
@@ -213,7 +227,6 @@ const moveLeadToStage = async (userId, organizationId, leadId, stageId, { lostRe
     lostAt: isLost ? new Date() : null,
   };
 
-  // Atomic: lead update + STAGE_CHANGE activity in one transaction.
   const updated = await prisma.$transaction(async (tx) => {
     const res = await leadDb.update(organizationId, leadId, updateData, tx);
     if (!res) throw new NotFoundError('LEAD_NOT_FOUND', 'Lead not found');
@@ -224,8 +237,14 @@ const moveLeadToStage = async (userId, organizationId, leadId, stageId, { lostRe
       leadId,
       {
         type: 'STAGE_CHANGE',
-        summary: `Moved from '${lead.stageId === target.id ? '?' : 'previous stage'}' to '${target.name}'`,
-        metadata: { from: lead.stageId, to: target.id, toName: target.name, reason: isLost ? updateData.lostReason : null },
+        summary: `Moved from '${fromStage?.name ?? 'unknown'}' to '${target.name}'`,
+        metadata: {
+          from: lead.stageId,
+          fromName: fromStage?.name ?? null,
+          to: target.id,
+          toName: target.name,
+          reason: isLost ? updateData.lostReason : null,
+        },
       },
       tx
     );
@@ -239,25 +258,98 @@ const moveLeadToStage = async (userId, organizationId, leadId, stageId, { lostRe
     action: 'LEAD_STAGE_CHANGED',
     resource: 'lead',
     resourceId: leadId,
-    metadata: { from: lead.stageId, to: target.id, toName: target.name, lost: isLost },
+    metadata: {
+      from: lead.stageId,
+      fromName: fromStage?.name ?? null,
+      to: target.id,
+      toName: target.name,
+      lost: isLost,
+    },
   });
 
   return updated;
 };
 
 // ============================================================
-// ASSIGN
+// PROMOTE TO WON
 // ============================================================
 
-const assignLead = async (userId, organizationId, leadId, assignedToId) => {
-  await assertPermission(userId, organizationId, 'crm.leads.assign', 'You do not have permission to assign leads');
-
+const promoteLeadToWon = async (userId, organizationId, leadId) => {
   const lead = await loadLeadOrThrow(organizationId, leadId);
   assertNotConverted(lead);
 
-  await assertAssigneeValid(organizationId, assignedToId);
+  const wonStage = await pipelineDb.findActiveWonStage(organizationId);
+  if (!wonStage) {
+    throw new ValidationError('NO_ACTIVE_WON_STAGE', 'No active Won stage configured');
+  }
+  if (lead.stageId === wonStage.id) {
+    throw new ValidationError('SAME_STAGE', 'Lead is already in the Won stage');
+  }
 
-  const updated = await leadDb.update(organizationId, leadId, { assignedToId });
+  const fromStage = lead.stageId
+    ? await pipelineDb.findById(organizationId, lead.stageId)
+    : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const res = await leadDb.update(
+      organizationId,
+      leadId,
+      { stageId: wonStage.id, lostReason: null, lostAt: null },
+      tx
+    );
+    if (!res) throw new NotFoundError('LEAD_NOT_FOUND', 'Lead not found');
+
+    await activitiesService.logSystemActivity(
+      organizationId,
+      userId,
+      leadId,
+      {
+        type: 'STAGE_CHANGE',
+        summary: `Moved from '${fromStage?.name ?? 'unknown'}' to '${wonStage.name}' (Won)`,
+        metadata: {
+          from: lead.stageId,
+          fromName: fromStage?.name ?? null,
+          to: wonStage.id,
+          toName: wonStage.name,
+          terminal: 'won',
+        },
+      },
+      tx
+    );
+
+    return res;
+  });
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'LEAD_PROMOTED_TO_WON',
+    resource: 'lead',
+    resourceId: leadId,
+    metadata: { from: lead.stageId, fromName: fromStage?.name ?? null, to: wonStage.id },
+  });
+
+  return updated;
+};
+
+// ============================================================
+// ASSIGNEES
+// ============================================================
+
+const listAssignees = async (userId, organizationId, leadId) => {
+  const lead = await leadDb.findById(organizationId, leadId);
+  if (!lead) throw new NotFoundError('LEAD_NOT_FOUND', 'Lead not found');
+  return leadDb.listAssignees(organizationId, leadId);
+};
+
+const addAssignee = async (userId, organizationId, leadId, assigneeUserId) => {
+  const lead = await leadDb.findByIdWithRelations(organizationId, leadId);
+  if (!lead) throw new NotFoundError('LEAD_NOT_FOUND', 'Lead not found');
+  assertNotConverted(lead);
+
+  await assertAssigneeValid(organizationId, assigneeUserId);
+
+  const row = await leadDb.addAssignee(organizationId, leadId, assigneeUserId, userId);
 
   await audit.log({
     organizationId,
@@ -265,10 +357,32 @@ const assignLead = async (userId, organizationId, leadId, assignedToId) => {
     action: 'LEAD_ASSIGNED',
     resource: 'lead',
     resourceId: leadId,
-    metadata: { assignedToId, previousAssigneeId: lead.assignedToId || null },
+    metadata: { assigneeUserId, assigneeEmail: row.user?.email },
   });
 
-  return updated;
+  return row;
+};
+
+const removeAssignee = async (userId, organizationId, leadId, assigneeUserId) => {
+  const lead = await leadDb.findById(organizationId, leadId);
+  if (!lead) throw new NotFoundError('LEAD_NOT_FOUND', 'Lead not found');
+  assertNotConverted(lead);
+
+  const count = await leadDb.removeAssignee(organizationId, leadId, assigneeUserId);
+  if (count === 0) {
+    throw new NotFoundError('ASSIGNEE_NOT_FOUND', 'This user is not assigned to this lead');
+  }
+
+  await audit.log({
+    organizationId,
+    userId,
+    action: 'LEAD_UNASSIGNED',
+    resource: 'lead',
+    resourceId: leadId,
+    metadata: { assigneeUserId },
+  });
+
+  return { message: 'Assignee removed' };
 };
 
 // ============================================================
@@ -276,8 +390,6 @@ const assignLead = async (userId, organizationId, leadId, assignedToId) => {
 // ============================================================
 
 const deleteLead = async (userId, organizationId, leadId) => {
-  await assertPermission(userId, organizationId, 'crm.leads.delete', 'You do not have permission to delete leads');
-
   const lead = await loadLeadOrThrow(organizationId, leadId);
   assertNotConverted(lead);
 
@@ -299,27 +411,17 @@ const deleteLead = async (userId, organizationId, leadId) => {
 // ============================================================
 // MARK CONVERTED (engine primitive — does NOT create orgs)
 // ============================================================
-//
-// Called by admin/crm/services/conversion.service after the org has
-// been created. Records the conversion; does not touch orgService.
 
 const markLeadAsConverted = async (organizationId, userId, leadId, convertedOrganizationId) => {
   const lead = await loadLeadOrThrow(organizationId, leadId);
 
   if (lead.convertedOrganizationId) {
-    throw new ConflictError(
-      'LEAD_ALREADY_CONVERTED',
-      'Lead is already converted to an organization'
-    );
+    throw new ConflictError('LEAD_ALREADY_CONVERTED', 'Lead is already converted to an organization');
   }
 
   const wonStage = await pipelineDb.findActiveWonStage(organizationId);
-  if (!wonStage) {
-    throw new ValidationError('NO_ACTIVE_WON_STAGE', 'No active Won stage configured');
-  }
-  if (lead.stageId !== wonStage.id) {
-    throw new ValidationError('LEAD_NOT_IN_WON', 'Lead must be in the Won stage to convert');
-  }
+  if (!wonStage) throw new ValidationError('NO_ACTIVE_WON_STAGE', 'No active Won stage configured');
+  if (lead.stageId !== wonStage.id) throw new ValidationError('LEAD_NOT_IN_WON', 'Lead must be in the Won stage to convert');
 
   const updated = await leadDb.update(organizationId, leadId, {
     convertedOrganizationId,
@@ -329,7 +431,7 @@ const markLeadAsConverted = async (organizationId, userId, leadId, convertedOrga
 
   await activitiesService.logSystemActivity(organizationId, userId, leadId, {
     type: 'NOTE',
-    summary: `Converted to organization ${convertedOrganizationId}`,
+    summary: `Linked to organization ${convertedOrganizationId}`,
     metadata: { convertedOrganizationId },
   });
 
@@ -345,13 +447,27 @@ const markLeadAsConverted = async (organizationId, userId, leadId, convertedOrga
   return updated;
 };
 
+// ============================================================
+// ACTIVITY GUARD (exported so the activities controller can use it)
+// ============================================================
+
+const assertCanLogActivity = async (organizationId, leadId) => {
+  const lead = await leadDb.findByIdWithRelations(organizationId, leadId);
+  if (!lead) throw new NotFoundError('LEAD_NOT_FOUND', 'Lead not found');
+  assertActivityAllowed(lead);
+};
+
 export default {
   listLeads,
   getLead,
   createLead,
   updateLead,
   moveLeadToStage,
-  assignLead,
+  promoteLeadToWon,
+  listAssignees,
+  addAssignee,
+  removeAssignee,
   deleteLead,
   markLeadAsConverted,
+  assertCanLogActivity,
 };
