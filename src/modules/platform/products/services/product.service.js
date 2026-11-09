@@ -211,14 +211,15 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
 
   const existing = await productDb.findOrganizationProduct(organizationId, product.id);
 
-  // Helper: build the enriched response
-  const buildResponse = async () => {
+  // Helper: build the enriched response.
+  // Accepts orgProductId explicitly so it also works on the new-activation path
+  // where `existing` was null when we started.
+  const buildResponse = async (orgProductId) => {
     const subscription = await subscriptionDb.findSubscription(organizationId, productKey);
 
-    // Fetch instances for this activation (may be empty if legacy org not yet backfilled)
     let instances = [];
-    if (existing) {
-      const rows = await productDb.findInstancesByOrganizationProduct(existing.id);
+    if (orgProductId) {
+      const rows = await productDb.findInstancesByOrganizationProduct(orgProductId);
       instances = rows.map((i) => ({
         id: i.id,
         vertical: i.vertical,
@@ -290,7 +291,7 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
       });
     }
 
-    return await buildResponse();
+    return await buildResponse(existing.id);
   }
 
   // Only owner can activate if not already active
@@ -298,13 +299,13 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
     throw new Error('Only the organization owner can activate products');
   }
 
+  let resultOrgProductId;
+
   if (existing) {
     // ─── Reactivate path ───
     await productDb.updateOrganizationProduct(organizationId, product.id, { isActive: true });
     await reactivateSubscription(organizationId, productKey);
 
-    // Backfill: if this activation has no instances yet, create a retail one.
-    // This covers legacy orgs that activated kxtill before ProductInstance existed.
     const instances = await productDb.findInstancesByOrganizationProduct(existing.id);
     if (instances.length === 0) {
       const defaultName = `${organization.name} Retail`;
@@ -319,6 +320,8 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
         console.log(`[products] Backfilled retail instance for org ${organizationId}`);
       }
     }
+
+    resultOrgProductId = existing.id;
   } else {
     // ─── New activation path ───
     const orgProduct = await productDb.createOrganizationProduct({
@@ -329,7 +332,6 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
     });
     await createSubscriptionForProduct(organizationId, productKey);
 
-    // Create the vertical instance
     const instanceName = `${organization.name} ${vertical.charAt(0).toUpperCase() + vertical.slice(1)}`;
     const instance = await productDb.createProductInstance({
       organizationProductId: orgProduct.id,
@@ -339,7 +341,6 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
     });
     console.log(`[products] Created ${vertical} instance for org ${organizationId}: ${instance.id}`);
 
-    // If pharmacy, attach the config
     if (vertical === 'pharmacy') {
       await productDb.createPharmacyConfig({
         productInstanceId: instance.id,
@@ -350,6 +351,8 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
       });
       console.log(`[products] Created pharmacy config for instance ${instance.id}`);
     }
+
+    resultOrgProductId = orgProduct.id;
   }
 
   await audit.log({
@@ -361,8 +364,8 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
     metadata: { productKey: product.key, productName: product.name, vertical },
   });
 
-  const response = await buildResponse();
-  sendActivationEmail({ userId, organization, response }); // not awaited, so the API responds immediately
+  const response = await buildResponse(resultOrgProductId);
+  sendActivationEmail({ userId, organization, response });
   return response;
 };
 
