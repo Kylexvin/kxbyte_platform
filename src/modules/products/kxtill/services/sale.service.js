@@ -177,6 +177,17 @@ const checkLowStockAlerts = async (organizationId, saleId) => {
 // Public entry point — opens the transaction, delegates to createSaleTx,
 // then performs post-commit side effects (audit + read-back).
 const createSale = async (userId, organizationId, data) => {
+  // Idempotency pre-flight: if the client already sent this exact sale
+  // (retry after a lost response, network flap, etc.), return the existing
+  // sale instead of creating a duplicate. Mirrors createOfflineSale.
+  // The client now sends clientSaleId on BOTH the online and offline paths.
+  if (data.clientSaleId) {
+    const existing = await saleDb.findSaleByClientId(data.clientSaleId);
+    if (existing) {
+      return saleDb.findSaleById(existing.id, organizationId);
+    }
+  }
+
   const { saleId } = await prisma.$transaction(
     (tx) => createSaleTx(tx, userId, organizationId, data),
     { maxWait: 5000, timeout: 15000 }
@@ -226,6 +237,19 @@ const createSale = async (userId, organizationId, data) => {
 // The items array gives verticals (e.g. pharmacy) exactly what they need to
 // link downstream rows (batch allocations, movements) to sale items without
 // a separate query-back.
+// Transaction-aware core — composable primitive for verticals.
+// MUST receive an active Prisma.TransactionClient as `tx`.
+// Does NOT open its own transaction. Does NOT use the global prisma client.
+//
+// Idempotency: performs a transaction-scoped check on clientSaleId to catch
+// races (two concurrent retries both pass createSale's pre-flight). If the
+// sale already exists, returns its id with no side effects.
+//
+// Returns:
+//   {
+//     saleId,
+//     items: [{ id, productId, branchProductId, baseQuantity }]
+//   }
 const createSaleTx = async (tx, userId, organizationId, data) => {
   const organization = await orgDb.findOrganizationById(organizationId);
   if (!organization) {
@@ -240,6 +264,20 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
   const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.create');
   if (!hasPermission) {
     throw new Error('You do not have permission to create sales');
+  }
+
+  // ---- Idempotency guard #2 (transaction-scoped) ----
+  // Catches the race where two concurrent requests with the same
+  // clientSaleId both pass createSale's pre-flight check. Mirrors
+  // createOfflineSaleTx.
+  if (data.clientSaleId) {
+    const existing = await tx.kxTillSale.findUnique({
+      where: { clientSaleId: data.clientSaleId },
+      select: { id: true },
+    });
+    if (existing) {
+      return { saleId: existing.id, items: [] };
+    }
   }
 
   const shiftId = await resolveShiftForSale({
@@ -347,6 +385,7 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
       organizationId,
       userId,
       reference,
+      clientSaleId: data.clientSaleId || null,   // ← Edit 2
       customerId: customer?.id || null,
       customerName: customer?.name || data.customerName || 'Walk-in',
       branchId: data.branchId,

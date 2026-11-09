@@ -701,7 +701,18 @@ model KxTillProduct {
   @@map("kxtill_products")
 }
 
+model KxTillFavoriteProduct {
+  id             String   @id @default(uuid())
+  organizationId String
+  userId         String
+  branchId       String
+  productId      String
+  createdAt      DateTime @default(now())
 
+  @@unique([userId, branchId, productId])
+  @@index([organizationId, branchId])
+  @@map("kxtill_favorite_products")
+}
 // ============================================================
 // KXTILL - BRANCH PRODUCTS & INVENTORY
 // ============================================================

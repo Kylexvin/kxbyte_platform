@@ -21,6 +21,8 @@ import notificationsController from '../controllers/notifications.controller.js'
 import devicesController from '../controllers/devices.controller.js';
 import teamController from '../controllers/team.controller.js';
 import * as salesService from '../services/sales.service.js';
+import favoritesController from '../controllers/favorites.controller.js';
+import salesSummaryController from '../controllers/sales-summary.controller.js';
 
 
 const router = express.Router({ mergeParams: true });
@@ -54,7 +56,30 @@ router.post('/branches/:branchId/shifts/:shiftId/force-close', branchesControlle
 router.get('/branches/:branchId/team', teamController.getBranchTeam); 
 
 
+// ============================================================
+// PRODUCT QUICK PICKS (favorites)
+// ============================================================
+//
+// User-scoped favorites per branch. Cashier stars products they sell
+// most → chips row at the top of the POS grid → one tap = added.
+//
+// Payload for toggle:
+//   { productId: string }
+//
+// Response for list: { items: [...] }  each item shaped like a
+// branch product with units + stock so the client can addToCart
+// directly.
+//
+router.get('/branches/:branchId/products/favorites', favoritesController.list);
+router.post('/branches/:branchId/products/favorites', favoritesController.toggle);
 
+// ============================================================
+// PRODUCT QUICK PICKS (favorites + recent + top)
+// ============================================================
+router.get('/branches/:branchId/products/favorites', favoritesController.list);
+router.post('/branches/:branchId/products/favorites', favoritesController.toggle);
+router.get('/branches/:branchId/products/recent', salesSummaryController.getRecent);
+router.get('/branches/:branchId/products/top', salesSummaryController.getTop);
 
 // ============================================================
 // NOTIFICATIONS
