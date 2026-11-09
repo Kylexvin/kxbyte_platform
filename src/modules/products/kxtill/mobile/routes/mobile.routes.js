@@ -20,6 +20,8 @@ import branchesController from '../controllers/branches.controller.js';
 import notificationsController from '../controllers/notifications.controller.js';
 import devicesController from '../controllers/devices.controller.js';
 import teamController from '../controllers/team.controller.js';
+import * as salesService from '../services/sales.service.js';
+
 
 const router = express.Router({ mergeParams: true });
 
@@ -65,23 +67,36 @@ router.post('/notifications/mark-all-read', notificationsController.markAllRead)
 router.post('/notifications/seed', notificationsController.seed);
 router.post('/devices/register', devicesController.register);
 router.delete('/devices/:token', devicesController.unregister);
-// TEMPORARY TEST ENDPOINT — remove after FCM is verified
-router.post('/devices/test-push', async (req, res) => {
+
+
+// ============================================================
+// SALES
+// ============================================================
+//
+// Mobile-scoped sale creation. Delegates to the core online path
+// (saleService.createSale). The offline path (/sales/offline) is
+// deliberately NOT exposed under /mobile — mobile is online-first.
+//
+// Payload (mirrors core POST /sales):
+//   {
+//     branchId?: string,        // optional; forced from context if omitted
+//     shiftId?: string|null,    // required only if branch shiftsEnabled
+//     customerId?: string|null,
+//     customerName?: string,
+//     items: [{ productId, unitId, quantity }],
+//     payments: [{ method, amount, reference? }],
+//     // OR legacy single: paymentMethod, paymentReference
+//   }
+//
+// Response: full sale object (saleDb.findSaleById shape).
+//
+router.post('/sales', async (req, res, next) => {
   try {
-    const ctx = req.mobileContext;
-    const pushService = (await import('../../../../platform/notifications/services/push.service.js')).default;
-    const result = await pushService.sendPushToUser(
-      ctx.user.id,
-      'kxtill',
-      {
-        title: 'Test push',
-        body: 'If you see this, the backend push pipeline works.',
-        data: { type: 'test', resource: '', resourceId: '' },
-      }
-    );
-    res.json({ ok: true, result });
+    const sale = await salesService.createMobileSale(req.mobileContext, req.body);
+    res.status(201).json(sale);
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    next(e);
   }
 });
+
 export default router;
