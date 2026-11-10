@@ -177,21 +177,30 @@ const checkLowStockAlerts = async (organizationId, saleId) => {
 // Public entry point — opens the transaction, delegates to createSaleTx,
 // then performs post-commit side effects (audit + read-back).
 const createSale = async (userId, organizationId, data) => {
-  // Idempotency pre-flight: if the client already sent this exact sale
-  // (retry after a lost response, network flap, etc.), return the existing
-  // sale instead of creating a duplicate. Mirrors createOfflineSale.
-  // The client now sends clientSaleId on BOTH the online and offline paths.
   if (data.clientSaleId) {
     const existing = await saleDb.findSaleByClientId(data.clientSaleId);
     if (existing) {
-      return saleDb.findSaleById(existing.id, organizationId);
+      const found = await saleDb.findSaleById(existing.id, organizationId);
+      if (found) return found;
     }
   }
 
-  const { saleId } = await prisma.$transaction(
-    (tx) => createSaleTx(tx, userId, organizationId, data),
-    { maxWait: 5000, timeout: 15000 }
-  );
+  let saleId;
+  try {
+    ({ saleId } = await prisma.$transaction(
+      (tx) => createSaleTx(tx, userId, organizationId, data),
+      { maxWait: 5000, timeout: 15000 }
+    ));
+  } catch (e) {
+    if (e?.code === 'P2002' && data.clientSaleId) {
+      const dup = await saleDb.findSaleByClientId(data.clientSaleId);
+      if (dup) {
+        const found = await saleDb.findSaleById(dup.id, organizationId);
+        if (found) return found;
+      }
+    }
+    throw e;
+  }
 
   const sale = await saleDb.findSaleById(saleId, organizationId);
 
@@ -266,19 +275,7 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
     throw new Error('You do not have permission to create sales');
   }
 
-  // ---- Idempotency guard #2 (transaction-scoped) ----
-  // Catches the race where two concurrent requests with the same
-  // clientSaleId both pass createSale's pre-flight check. Mirrors
-  // createOfflineSaleTx.
-  if (data.clientSaleId) {
-    const existing = await tx.kxTillSale.findUnique({
-      where: { clientSaleId: data.clientSaleId },
-      select: { id: true },
-    });
-    if (existing) {
-      return { saleId: existing.id, items: [] };
-    }
-  }
+
 
   const shiftId = await resolveShiftForSale({
     organizationId,

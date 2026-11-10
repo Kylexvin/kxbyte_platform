@@ -21,10 +21,22 @@ export const SECTION_PERMISSIONS = {
 
 const SHORTCUTS = [
   {
+    id: 'pos',
+    label: 'Open POS',
+    icon: 'cart-outline',
+    permission: 'kxtill.sales.create',   // ← create, not view — POS is for selling
+  },
+  {
     id: 'stock',
     label: 'Stock',
     icon: 'cube-outline',
     permission: 'kxtill.inventory.view',
+  },
+  {
+    id: 'team',
+    label: 'Team',
+    icon: 'people-outline',
+    permission: 'members.view',          // ← platform-scope, matches your PERMISSIONS.PLATFORM.MEMBERS.VIEW
   },
   {
     id: 'branches',
