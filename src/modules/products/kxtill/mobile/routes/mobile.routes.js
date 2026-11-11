@@ -107,21 +107,21 @@ router.post('/sales', async (req, res, next) => {
   }
 });
 
-router.post('/dev/push', async (req, res) => {
-  const { token, title = 'FCM test', body = 'Hello' } = req.body || {};
-  if (!token) return res.status(400).json({ error: 'token required' });
-
-  const { resolveProvider } = await import(
-    '../../../../platform/notifications/providers/provider.registry.js'
-  );
-  const provider = resolveProvider('kxtill');
-  if (!provider) return res.status(500).json({ error: 'no provider' });
-
+// TEMPORARY TEST ENDPOINT — remove after FCM verification
+router.post('/devices/test-push', async (req, res) => {
   try {
-    await provider.send({ token, title, body, data: {} });
-    res.json({ ok: true });
+    const ctx = req.mobileContext;
+    const pushService = (
+      await import('../../../../platform/notifications/services/push.service.js')
+    ).default;
+    const result = await pushService.sendPushToUser(ctx.user.id, 'kxtill', {
+      title: 'Test push',
+      body: 'Backend → FCM → phone works.',
+      data: { type: 'test', resource: '', resourceId: '' },
+    });
+    res.json({ ok: true, result });
   } catch (e) {
-    res.status(500).json({ error: e?.message || 'send failed', code: e?.code });
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
