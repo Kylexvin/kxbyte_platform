@@ -18,9 +18,20 @@
 // stock rows. Two concurrent sales at different counters will serialize on
 // the same batch rows, so they can never oversell. Counter B waits for
 // Counter A's transaction to commit, then sees the updated quantity.
+//
+// LOCK ORDER: rows are locked in (expiryDate, id) order. The id tie-break
+// makes the order deterministic when two batches share an expiry date, so two
+// sales can never lock the same rows in opposite orders. Callers that allocate
+// for several products in one transaction should call this in a stable order
+// (e.g. sorted by branchProductId) for the same reason.
+//
+// CALLERS: if one sale contains the same product on several lines, allocate
+// ONCE for the summed quantity and split the result across the lines.
+// Calling this per line plans against the same un-decremented rows twice and
+// over-allocates the first batch.
 
 /**
- * Allocate stock from batches for one sale item.
+ * Allocate stock from batches for one branch product.
  *
  * @param {Prisma.TransactionClient} tx
  * @param {Object} params
@@ -55,7 +66,7 @@ const allocateFEFO = async (tx, { branchProductId, baseQuantity }) => {
       AND bs."quantityOnHand" > 0
       AND bs.status = 'AVAILABLE'
       AND b."expiryDate" > NOW()
-    ORDER BY b."expiryDate" ASC
+    ORDER BY b."expiryDate" ASC, bs.id ASC
     FOR UPDATE OF bs
   `;
 

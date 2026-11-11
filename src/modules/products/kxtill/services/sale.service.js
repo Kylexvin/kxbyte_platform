@@ -29,10 +29,22 @@ const generateReference = () => {
   return `INV-${timestamp}-${random}`;
 };
 
-const resolveShiftForSale = async ({ organizationId, userId, branchId, shiftId }) => {
-  const branchSetting = await settingDb.findSettingByBranch(branchId);
+// `branchSetting` is optional. Callers that already loaded the branch
+// setting pass it in to avoid a duplicate query. `undefined` = load it here;
+// `null` = "already loaded, there is no setting".
+const resolveShiftForSale = async ({
+  organizationId,
+  userId,
+  branchId,
+  shiftId,
+  branchSetting,
+}) => {
+  const setting =
+    branchSetting !== undefined
+      ? branchSetting
+      : await settingDb.findSettingByBranch(branchId);
 
-  if (!branchSetting?.shiftsEnabled) {
+  if (!setting?.shiftsEnabled) {
     return null;
   }
 
@@ -110,6 +122,22 @@ const resolvePaymentStatus = (payments, totalAmount) => {
   return { paymentStatus: 'PAID', balance: 0 };
 };
 
+const loadCustomer = async (customerId, organizationId) => {
+  if (!customerId) return null;
+  const customerService = await import('../../../platform/customers/index.js');
+  return customerService.default.validateCustomer(customerId, organizationId);
+};
+
+// Runs fn, records how long it took under `label` (ms), rethrows on error.
+const timed = async (timings, label, fn) => {
+  const t = performance.now();
+  try {
+    return await fn();
+  } finally {
+    timings[label] = Math.round(performance.now() - t);
+  }
+};
+
 // ============================================================
 // POST-COMMIT LOW-STOCK CHECK
 // ============================================================
@@ -165,17 +193,207 @@ const checkLowStockAlerts = async (organizationId, saleId) => {
 };
 
 // ============================================================
+// PREPARE SALE (read-only phase — runs OUTSIDE any transaction)
+// ============================================================
+
+// Everything that only READS is done here, on the global client, before a
+// transaction is opened. This keeps the interactive transaction short and
+// stops it from holding a pooled connection while waiting for a second one.
+//
+// Safe to run outside the tx because the real oversell guard is the
+// `updateMany ... stock >= baseQuantity` inside createSaleTx. Anything read
+// here may be slightly stale; the tx re-checks what matters.
+//
+// Reads are batched: one query for units, one for branch products, and
+// product lookups run in parallel. Independent checks run concurrently.
+//
+// Returns the `prepared` object consumed by createSaleTx:
+//   { shiftId, customer, preparedItems, subtotal, taxAmount, totalAmount,
+//     payments, finalPaymentStatus, reference }
+//
+// Each preparedItem: { product, branchProduct, unit, quantity, conversionQty,
+//                      baseQuantity, unitPrice, tax, total, trackInventory }
+// Items are in the same order as data.items.
+const prepareSale = async (userId, organizationId, data) => {
+  const timings = {};
+  const tStart = performance.now();
+
+  // ---- Phase 1: access checks (fail fast before doing any other work) ----
+  const [organization, membership, hasPermission] = await Promise.all([
+    timed(timings, 'org', () => orgDb.findOrganizationById(organizationId)),
+    timed(timings, 'membership', () => orgDb.findMembership(userId, organizationId)),
+    timed(timings, 'permission', () =>
+      checkPermission(userId, organizationId, 'kxtill.sales.create')
+    ),
+  ]);
+  timings.phase1 = Math.round(performance.now() - tStart);
+
+  if (!organization) {
+    throw new Error('Organization not found');
+  }
+  if (!membership) {
+    throw new Error('You do not have access to this organization');
+  }
+  if (!hasPermission) {
+    throw new Error('You do not have permission to create sales');
+  }
+
+  // ---- Phase 2: everything else, in parallel ----
+  const productIds = [...new Set(data.items.map((i) => i.productId))];
+  const unitIds = [...new Set(data.items.map((i) => i.unitId))];
+
+  // Branch setting is needed by both shift resolution and credit validation.
+  const tPhase2 = performance.now();
+
+  // Branch setting is needed by both shift resolution and credit validation.
+  const branchSettingP = timed(timings, 'setting', () =>
+    settingDb.findSettingByBranch(data.branchId)
+  );
+
+  const [branchSetting, shiftId, customer, products, units, branchProducts] =
+    await Promise.all([
+      branchSettingP,
+      // 'shift' = the shift check's own work; it starts after 'setting' resolves
+      branchSettingP.then((branchSetting) =>
+        timed(timings, 'shift', () =>
+          resolveShiftForSale({
+            organizationId,
+            userId,
+            branchId: data.branchId,
+            shiftId: data.shiftId,
+            branchSetting,
+          })
+        )
+      ),
+      timed(timings, 'customer', () => loadCustomer(data.customerId, organizationId)),
+      timed(timings, 'products', () =>
+        Promise.all(
+          productIds.map((id) => productDb.findProductById(id, organizationId))
+        )
+      ),
+      timed(timings, 'units', () =>
+        prisma.kxTillProductUnit.findMany({ where: { id: { in: unitIds } } })
+      ),
+      timed(timings, 'branchProducts', () =>
+        prisma.kxTillBranchProduct.findMany({
+          where: { productId: { in: productIds }, branchId: data.branchId },
+        })
+      ),
+    ]);
+  timings.phase2 = Math.round(performance.now() - tPhase2);
+
+  const productMap = new Map();
+  products.forEach((p, i) => {
+    if (p) productMap.set(productIds[i], p);
+  });
+  const unitMap = new Map(units.map((u) => [u.id, u]));
+  const branchProductMap = new Map(branchProducts.map((bp) => [bp.productId, bp]));
+
+  // ---- Pure in-memory computation ----
+  let subtotal = 0;
+  let taxAmount = 0;
+  const preparedItems = [];
+
+  for (const item of data.items) {
+    const product = productMap.get(item.productId);
+    if (!product) {
+      throw new Error(`Product ${item.productId} not found`);
+    }
+
+    const unit = unitMap.get(item.unitId);
+    if (!unit || unit.productId !== item.productId) {
+      throw new Error(`Unit ${item.unitId} not found for product ${item.productId}`);
+    }
+
+    const quantity = Number(item.quantity);
+    const conversionQty = Number(unit.conversionQty);
+    const baseQuantity = quantity * conversionQty;
+    const unitPrice = Number(unit.price || product.price);
+
+    const branchProduct = branchProductMap.get(product.id);
+    if (!branchProduct) {
+      throw new Error(`Product ${product.name} is not available at this branch`);
+    }
+
+    const trackInventory = !!product.trackInventory;
+
+    // Fast-fail pre-check (may be stale). The authoritative guard is the
+    // conditional decrement inside createSaleTx.
+    if (trackInventory && Number(branchProduct.stock) < baseQuantity) {
+      throw new Error(
+        `Insufficient stock for ${product.name}. Available: ${branchProduct.stock} ${product.baseUnit?.abbreviation || 'units'}`
+      );
+    }
+
+    const total = quantity * unitPrice;
+    const tax = total * (Number(product.taxRate) / 100);
+
+    subtotal += total;
+    taxAmount += tax;
+
+    preparedItems.push({
+      product,
+      branchProduct,
+      unit,
+      quantity,
+      conversionQty,
+      baseQuantity,
+      unitPrice,
+      tax,
+      total,
+      trackInventory,
+    });
+  }
+
+  const totalAmount = subtotal + taxAmount;
+  const reference = generateReference();
+
+  const payments = normalizePayments(data, totalAmount);
+  const { paymentStatus } = resolvePaymentStatus(payments, totalAmount);
+
+  // ---- Credit validation ----
+  const creditTotal = payments
+    .filter((p) => p.method === 'CREDIT')
+    .reduce((s, p) => s + p.amount, 0);
+  const hasCredit = creditTotal > 0;
+
+  if (hasCredit) {
+    if (!customer) {
+      throw new Error('Credit sale requires a customer');
+    }
+    if (!branchSetting?.creditEnabled) {
+      throw new Error('Credit is not enabled for this branch');
+    }
+    await timed(timings, 'credit', () =>
+      creditService.checkCreditLimit(customer.id, organizationId, creditTotal)
+    );
+  }
+
+  const finalPaymentStatus = hasCredit ? 'CREDIT' : paymentStatus;
+
+  timings.total = Math.round(performance.now() - tStart);
+
+  return {
+    shiftId,
+    customer,
+    preparedItems,
+    subtotal,
+    taxAmount,
+    totalAmount,
+    payments,
+    finalPaymentStatus,
+    reference,
+    timings, // per-query ms, for logging only
+  };
+};
+
+// ============================================================
 // CREATE SALE (online)
 // ============================================================
 
-// Public entry point — opens the transaction, delegates to createSaleTx,
-// then performs post-commit side effects (audit + read-back).
-// ============================================================
-// CREATE SALE (online)
-// ============================================================
-
-// Public entry point — opens the transaction, delegates to createSaleTx,
-// then performs post-commit side effects (audit + read-back).
+// Public entry point — runs the read-only prepare phase, opens a short
+// transaction for the writes, then performs post-commit side effects
+// (audit + read-back).
 const createSale = async (userId, organizationId, data) => {
   if (data.clientSaleId) {
     const existing = await saleDb.findSaleByClientId(data.clientSaleId);
@@ -185,10 +403,12 @@ const createSale = async (userId, organizationId, data) => {
     }
   }
 
+  const prepared = await prepareSale(userId, organizationId, data);
+
   let saleId;
   try {
     ({ saleId } = await prisma.$transaction(
-      (tx) => createSaleTx(tx, userId, organizationId, data),
+      (tx) => createSaleTx(tx, userId, organizationId, data, prepared),
       { maxWait: 5000, timeout: 15000 }
     ));
   } catch (e) {
@@ -235,7 +455,19 @@ const createSale = async (userId, organizationId, data) => {
 
 // Transaction-aware core — composable primitive for verticals.
 // MUST receive an active Prisma.TransactionClient as `tx`.
-// Does NOT open its own transaction. Does NOT use the global prisma client.
+// Does NOT open its own transaction. Does NOT use the global prisma client
+// for the write path.
+//
+// `prepared` is the result of prepareSale(), computed BEFORE the transaction
+// was opened. Verticals should call prepareSale first and pass it in so no
+// reads happen while the tx holds a connection.
+//
+// For backwards compatibility, if `prepared` is omitted this falls back to
+// running prepareSale here — which works, but performs reads on the global
+// client while the tx is open (the slow, pool-starving behaviour).
+//
+// Idempotency: createSale's pre-flight check plus the unique constraint on
+// clientSaleId (P2002, handled by the callers) cover retries and races.
 //
 // Returns:
 //   {
@@ -245,136 +477,21 @@ const createSale = async (userId, organizationId, data) => {
 //
 // The items array gives verticals (e.g. pharmacy) exactly what they need to
 // link downstream rows (batch allocations, movements) to sale items without
-// a separate query-back.
-// Transaction-aware core — composable primitive for verticals.
-// MUST receive an active Prisma.TransactionClient as `tx`.
-// Does NOT open its own transaction. Does NOT use the global prisma client.
-//
-// Idempotency: performs a transaction-scoped check on clientSaleId to catch
-// races (two concurrent retries both pass createSale's pre-flight). If the
-// sale already exists, returns its id with no side effects.
-//
-// Returns:
-//   {
-//     saleId,
-//     items: [{ id, productId, branchProductId, baseQuantity }]
-//   }
-const createSaleTx = async (tx, userId, organizationId, data) => {
-  const organization = await orgDb.findOrganizationById(organizationId);
-  if (!organization) {
-    throw new Error('Organization not found');
-  }
+// a separate query-back. Order matches data.items.
+const createSaleTx = async (tx, userId, organizationId, data, prepared = null) => {
+  const ctx = prepared ?? (await prepareSale(userId, organizationId, data));
 
-  const membership = await orgDb.findMembership(userId, organizationId);
-  if (!membership) {
-    throw new Error('You do not have access to this organization');
-  }
-
-  const hasPermission = await checkPermission(userId, organizationId, 'kxtill.sales.create');
-  if (!hasPermission) {
-    throw new Error('You do not have permission to create sales');
-  }
-
-
-
-  const shiftId = await resolveShiftForSale({
-    organizationId,
-    userId,
-    branchId: data.branchId,
-    shiftId: data.shiftId,
-  });
-
-  let customer = null;
-  if (data.customerId) {
-    const customerService = await import('../../../platform/customers/index.js');
-    customer = await customerService.default.validateCustomer(data.customerId, organizationId);
-  }
-
-  // ---- Pre-validate + compute everything BEFORE touching the database ----
-  let subtotal = 0;
-  let taxAmount = 0;
-  const preparedItems = [];
-
-  for (const item of data.items) {
-    const product = await productDb.findProductById(item.productId, organizationId);
-    if (!product) {
-      throw new Error(`Product ${item.productId} not found`);
-    }
-
-    const unit = await productDb.findUnitById(item.unitId, item.productId);
-    if (!unit) {
-      throw new Error(`Unit ${item.unitId} not found for product ${item.productId}`);
-    }
-
-    const quantity = Number(item.quantity);
-    const conversionQty = Number(unit.conversionQty);
-    const baseQuantity = quantity * conversionQty;
-    const unitPrice = Number(unit.price || product.price);
-
-    const branchProduct = await tx.kxTillBranchProduct.findFirst({
-      where: {
-        productId: product.id,
-        branchId: data.branchId,
-      },
-    });
-
-    if (!branchProduct) {
-      throw new Error(`Product ${product.name} is not available at this branch`);
-    }
-
-    const trackInventory = !!product.trackInventory;
-
-    if (trackInventory && Number(branchProduct.stock) < baseQuantity) {
-      throw new Error(
-        `Insufficient stock for ${product.name}. Available: ${branchProduct.stock} ${product.baseUnit?.abbreviation || 'units'}`
-      );
-    }
-
-    const total = quantity * unitPrice;
-    const tax = total * (Number(product.taxRate) / 100);
-
-    subtotal += total;
-    taxAmount += tax;
-
-    preparedItems.push({
-      product,
-      branchProduct,
-      unit,
-      quantity,
-      conversionQty,
-      baseQuantity,
-      unitPrice,
-      tax,
-      total,
-      trackInventory,
-    });
-  }
-
-  const totalAmount = subtotal + taxAmount;
-  const reference = generateReference();
-
-  const payments = normalizePayments(data, totalAmount);
-  const { paymentStatus } = resolvePaymentStatus(payments, totalAmount);
-
-  // ---- Credit validation ----
-  const creditPayments = payments.filter((p) => p.method === 'CREDIT');
-  const creditTotal = creditPayments.reduce((s, p) => s + p.amount, 0);
-  const hasCredit = creditTotal > 0;
-
-  if (hasCredit) {
-    if (!customer) {
-      throw new Error('Credit sale requires a customer');
-    }
-
-    const branchSetting = await settingDb.findSettingByBranch(data.branchId);
-    if (!branchSetting?.creditEnabled) {
-      throw new Error('Credit is not enabled for this branch');
-    }
-
-    await creditService.checkCreditLimit(customer.id, organizationId, creditTotal);
-  }
-
-  const finalPaymentStatus = hasCredit ? 'CREDIT' : paymentStatus;
+  const {
+    shiftId,
+    customer,
+    preparedItems,
+    subtotal,
+    taxAmount,
+    totalAmount,
+    payments,
+    finalPaymentStatus,
+    reference,
+  } = ctx;
 
   // ---- Writes — all use `tx` ----
   const createdSale = await saleDb.createSale(
@@ -382,7 +499,7 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
       organizationId,
       userId,
       reference,
-      clientSaleId: data.clientSaleId || null,   // ← Edit 2
+      clientSaleId: data.clientSaleId || null,
       customerId: customer?.id || null,
       customerName: customer?.name || data.customerName || 'Walk-in',
       branchId: data.branchId,
@@ -397,23 +514,37 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
     tx
   );
 
+  // Guarded aggregate-stock decrements, in a deterministic order (by
+  // branchProduct id). Two concurrent sales holding the same products in
+  // different line order would otherwise lock these rows in opposite orders
+  // and deadlock. This is the authoritative oversell guard.
+  const stockOrder = preparedItems
+    .filter((p) => p.trackInventory)
+    .sort((a, b) =>
+      a.branchProduct.id < b.branchProduct.id
+        ? -1
+        : a.branchProduct.id > b.branchProduct.id
+          ? 1
+          : 0
+    );
+
+  for (const p of stockOrder) {
+    const result = await tx.kxTillBranchProduct.updateMany({
+      where: {
+        id: p.branchProduct.id,
+        stock: { gte: p.baseQuantity },
+      },
+      data: { stock: { decrement: p.baseQuantity } },
+    });
+
+    if (result.count === 0) {
+      throw new Error(`Insufficient stock for ${p.product.name}`);
+    }
+  }
+
   const createdItems = [];
 
   for (const p of preparedItems) {
-    if (p.trackInventory) {
-      const result = await tx.kxTillBranchProduct.updateMany({
-        where: {
-          id: p.branchProduct.id,
-          stock: { gte: p.baseQuantity },
-        },
-        data: { stock: { decrement: p.baseQuantity } },
-      });
-
-      if (result.count === 0) {
-        throw new Error(`Insufficient stock for ${p.product.name}`);
-      }
-    }
-
     const createdItem = await saleDb.createSaleItem(
       {
         saleId: createdSale.id,
@@ -485,6 +616,10 @@ const createSaleTx = async (tx, userId, organizationId, data) => {
 //
 // Idempotency: if clientSaleId already exists, the wrapper skips audit and
 // just returns the existing sale (matching prior behavior).
+//
+// NOTE: this path still does its reads inside the transaction. It can be
+// moved to the same prepare/tx split as createSale once the online path is
+// verified.
 const createOfflineSale = async (userId, organizationId, data) => {
   const { clientSaleId } = data;
 
@@ -534,7 +669,6 @@ const createOfflineSale = async (userId, organizationId, data) => {
     });
 
     checkLowStockAlerts(organizationId, saleId).catch(() => {});
-
   }
 
   return sale;
@@ -941,10 +1075,6 @@ const generateRefundReference = () => {
   return `REF-${timestamp}-${random}`;
 };
 
-// ============================================================
-// REFUND (partial + multi-method)
-// ============================================================
-
 // Public entry — opens the transaction, delegates to refundSaleTx,
 // then performs post-commit side effects (audit + read-back).
 const refundSale = async (organizationId, userId, saleId, payload = {}) => {
@@ -1266,6 +1396,7 @@ const refundSaleTx = async (tx, organizationId, userId, saleId, payload = {}) =>
 };
 
 export default {
+  prepareSale,
   createSale,
   createSaleTx,
   getSales,
@@ -1273,6 +1404,6 @@ export default {
   refundSale,
   refundSaleTx,
   createOfflineSale,
-  createOfflineSaleTx, 
+  createOfflineSaleTx,
   getSaleRefundableState,
 };

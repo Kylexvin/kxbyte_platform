@@ -130,6 +130,13 @@ const createMovementTx = async (tx, data) => {
   return tx.kxTillPharmacyStockMovement.create({ data });
 };
 
+// Bulk-insert stock movement rows in ONE round trip.
+// `rows` is an array of the same shape createMovementTx takes.
+const createMovementsTx = async (tx, rows) => {
+  if (!rows || rows.length === 0) return { count: 0 };
+  return tx.kxTillPharmacyStockMovement.createMany({ data: rows });
+};
+
 // ============================================================
 // BATCH READS (list, expiring, per-product with FEFO sort)
 // ============================================================
@@ -255,17 +262,48 @@ const createSaleBatchAllocationTx = async (tx, data) => {
   return tx.kxTillPharmacySaleBatchAllocation.create({ data });
 };
 
+// Bulk-insert allocation rows in ONE round trip.
+// `rows` is an array of the same shape createSaleBatchAllocationTx takes.
+const createSaleBatchAllocationsTx = async (tx, rows) => {
+  if (!rows || rows.length === 0) return { count: 0 };
+  return tx.kxTillPharmacySaleBatchAllocation.createMany({ data: rows });
+};
+
 // ============================================================
 // BATCH STOCK — ATOMIC DECREMENT
 // ============================================================
 
 // Decrement batch stock atomically. Uses `decrement` to avoid read-modify-write
 // races. Caller must have already locked the row via FEFO's FOR UPDATE.
+//
+// NOTE: this version is UNGUARDED — it can drive quantityOnHand below zero.
+// Prefer decrementBatchStockGuardedTx for sales.
 const decrementBatchStockTx = async (tx, batchStockId, quantity) => {
   return tx.kxTillPharmacyBatchStock.update({
     where: { id: batchStockId },
     data: { quantityOnHand: { decrement: quantity } },
   });
+};
+
+// Guarded decrement: only applies when quantityOnHand >= quantity, and throws
+// if it did not. This is the batch-level equivalent of Core's
+// `stock >= baseQuantity` guard on branchProduct.stock, so batch stock can
+// never go negative even if an allocation plan is wrong.
+const decrementBatchStockGuardedTx = async (tx, batchStockId, quantity) => {
+  const result = await tx.kxTillPharmacyBatchStock.updateMany({
+    where: { id: batchStockId, quantityOnHand: { gte: quantity } },
+    data: { quantityOnHand: { decrement: quantity } },
+  });
+
+  if (result.count === 0) {
+    const err = new Error(
+      `Insufficient batch stock for batchStock ${batchStockId} (needed ${quantity})`
+    );
+    err.code = 'INSUFFICIENT_BATCH_STOCK';
+    throw err;
+  }
+
+  return result;
 };
 
 // ============================================================
@@ -334,10 +372,13 @@ export default {
   upsertBatchStockTx,
   incrementBranchProductStockTx,
   createMovementTx,
+  createMovementsTx,
 
   //sale operations
   createSaleBatchAllocationTx,
+  createSaleBatchAllocationsTx,
   decrementBatchStockTx,
+  decrementBatchStockGuardedTx,
 
   // Refund allocations
   findSaleAllocationsByItemTx,
