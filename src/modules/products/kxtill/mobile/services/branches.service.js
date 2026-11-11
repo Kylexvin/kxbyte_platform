@@ -51,9 +51,9 @@ export async function composeBranches(ctx, { period = 'today' } = {}) {
     branches.sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
   }
 
-  const isOrgWide =
-    canSeeRevenue === false ? false : raw.length > 1;
-
+const isOrgWide =
+  canSeeRevenue === false ? false : raw.length > 1;
+  
   return {
     scope: {
       isOrgWide,
