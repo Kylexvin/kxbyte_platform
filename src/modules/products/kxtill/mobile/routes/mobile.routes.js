@@ -97,30 +97,31 @@ router.delete('/devices/:token', devicesController.unregister);
 // ============================================================
 // SALES
 // ============================================================
-//
-// Mobile-scoped sale creation. Delegates to the core online path
-// (saleService.createSale). The offline path (/sales/offline) is
-// deliberately NOT exposed under /mobile — mobile is online-first.
-//
-// Payload (mirrors core POST /sales):
-//   {
-//     branchId?: string,        // optional; forced from context if omitted
-//     shiftId?: string|null,    // required only if branch shiftsEnabled
-//     customerId?: string|null,
-//     customerName?: string,
-//     items: [{ productId, unitId, quantity }],
-//     payments: [{ method, amount, reference? }],
-//     // OR legacy single: paymentMethod, paymentReference
-//   }
-//
-// Response: full sale object (saleDb.findSaleById shape).
-//
+
 router.post('/sales', async (req, res, next) => {
   try {
     const sale = await salesService.createMobileSale(req.mobileContext, req.body);
     res.status(201).json(sale);
   } catch (e) {
     next(e);
+  }
+});
+
+router.post('/dev/push', async (req, res) => {
+  const { token, title = 'FCM test', body = 'Hello' } = req.body || {};
+  if (!token) return res.status(400).json({ error: 'token required' });
+
+  const { resolveProvider } = await import(
+    '../../../../platform/notifications/providers/provider.registry.js'
+  );
+  const provider = resolveProvider('kxtill');
+  if (!provider) return res.status(500).json({ error: 'no provider' });
+
+  try {
+    await provider.send({ token, title, body, data: {} });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || 'send failed', code: e?.code });
   }
 });
 
