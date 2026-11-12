@@ -255,14 +255,23 @@ router.get('/revenue/payments',
   requirePlatformAdmin('admin.payments.view'), revenue.list);
 
 // ============================================================
-// PRODUCTS
+// PRODUCTS — internal catalogue (not tenant-facing)
 // ============================================================
 router.get('/products',
-  requirePlatformAdmin('admin.organizations.view'), productsCtrl.list);
+  requirePlatformAdmin('admin.products.view'), productsCtrl.list);
 
 router.get('/products/:key',
-  requirePlatformAdmin('admin.organizations.view'), productsCtrl.getOne);
+  requirePlatformAdmin('admin.products.view'), productsCtrl.getOne);
 
+router.patch('/products/:key',
+  requirePlatformAdmin('admin.products.manage'), productsCtrl.update);
+
+// Icon upload — Cloudinary direct upload
+router.post('/products/:key/uploads/signature',
+  requirePlatformAdmin('admin.products.manage'), productsCtrl.getUploadSignature);
+
+router.delete('/products/:key/icon',
+  requirePlatformAdmin('admin.products.manage'), productsCtrl.deleteIcon);
 
 // ============================================================
 // CRM (kxcrm product) - routes

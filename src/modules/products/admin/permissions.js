@@ -19,6 +19,12 @@ const permissions = [
   { key: 'admin.organizations.view',   name: 'View Organizations',   description: 'List and view all customer organizations' },
   { key: 'admin.organizations.manage', name: 'Manage Organizations', description: 'Activate, suspend, archive organizations' },
 
+
+  // ============================================================
+  // PRODUCTS
+  // ============================================================
+  { key: 'admin.products.view',   name: 'View Products',   description: 'View the internal product catalogue' },
+  { key: 'admin.products.manage', name: 'Manage Products', description: 'Edit product name, description, icon and availability' },
   // ============================================================
   // SUBSCRIPTIONS
   // ============================================================

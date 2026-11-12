@@ -1,57 +1,102 @@
-import prisma from '../../../../database/postgres/prisma.js';
+// src/modules/products/admin/controllers/products.controller.js
+//
+// Admin products catalogue — internal only.
+// Handlers: list, getOne, update, getUploadSignature, deleteIcon.
+// No tenant data (subscriptions, payments) — those belong to /organizations
+// and /subscriptions.
+
+import productsService from '../services/products.service.js';
+
+// ============================================================
+// ERROR MAP
+// ============================================================
+
+const STATUS_BY_TYPE = {
+  ValidationError: 400,
+  ForbiddenError: 403,
+  NotFoundError: 404,
+  ConflictError: 409,
+};
+
+const handleError = (res, err, label) => {
+  const status = STATUS_BY_TYPE[err.name] || 500;
+  if (status >= 500) console.error(`${label} error:`, err);
+  res.status(status).json({ error: err.message, code: err.code });
+};
+
+// ============================================================
+// LIST
+// ============================================================
 
 export const list = async (req, res) => {
   try {
-    const products = await prisma.product.findMany({
-      where: { key: { not: 'admin' } },
-      orderBy: { key: 'asc' },
-    });
-
-    const enriched = await Promise.all(
-      products.map(async (p) => {
-        const [active, trial, expired, total] = await Promise.all([
-          prisma.subscription.count({ where: { productKey: p.key, status: 'ACTIVE', organization: { isInternal: false } } }),
-          prisma.subscription.count({ where: { productKey: p.key, status: 'TRIAL', organization: { isInternal: false } } }),
-          prisma.subscription.count({ where: { productKey: p.key, status: 'EXPIRED', organization: { isInternal: false } } }),
-          prisma.subscription.count({ where: { productKey: p.key, organization: { isInternal: false } } }),
-        ]);
-        return { ...p, adoption: { active, trial, expired, total } };
-      })
-    );
-
-    res.json({ data: enriched });
+    const products = await productsService.listProducts();
+    res.json({ data: products });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err, 'admin products list');
   }
 };
 
+// ============================================================
+// DETAIL
+// ============================================================
+
 export const getOne = async (req, res) => {
   try {
-    const { key } = req.params;
-    const product = await prisma.product.findUnique({ where: { key } });
-    if (!product) return res.status(404).json({ error: 'Product not found' });
-
-    const [subs, payments] = await Promise.all([
-      prisma.subscription.findMany({
-        where: { productKey: key, organization: { isInternal: false } },
-        include: { organization: { select: { id: true, name: true, slug: true } } },
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.payment.aggregate({
-        where: { status: 'COMPLETED', subscription: { productKey: key, organization: { isInternal: false } } },
-        _sum: { amount: true },
-        _count: { _all: true },
-      }),
-    ]);
-
-    res.json({
-      data: {
-        ...product,
-        subscriptions: subs,
-        revenue: { total: payments._sum.amount || 0, count: payments._count._all || 0 },
-      },
-    });
+    const product = await productsService.getProductDetail(req.params.key);
+    res.json({ data: product });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err, 'admin products getOne');
+  }
+};
+
+// ============================================================
+// UPDATE
+// ============================================================
+
+export const update = async (req, res) => {
+  try {
+    const product = await productsService.updateProduct(
+      req.params.key,
+      req.user.userId,
+      req.body
+    );
+    res.json({ data: product });
+  } catch (err) {
+    handleError(res, err, 'admin products update');
+  }
+};
+
+// ============================================================
+// ICON UPLOAD — signature
+// ============================================================
+
+export const getUploadSignature = async (req, res) => {
+  try {
+    const signature = await productsService.issueProductIconSignature(
+      req.params.key,
+      req.user.userId
+    );
+    res.json({ data: signature });
+  } catch (err) {
+    handleError(res, err, 'admin products signature');
+  }
+};
+
+// ============================================================
+// ICON — delete
+// ============================================================
+
+export const deleteIcon = async (req, res) => {
+  try {
+    const { publicId } = req.body || {};
+    const result = await productsService.deleteProductIcon(
+      req.params.key,
+      req.user.userId,
+      publicId
+    );
+    res.json({ data: result });
+  } catch (err) {
+    handleError(res, err, 'admin products deleteIcon');
   }
 };
