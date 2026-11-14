@@ -4,24 +4,9 @@ import subscriptionService from '../../../platform/subscriptions/services/subscr
 import subscriptionDb from '../../../platform/subscriptions/db/subscription.db.js';
 import planDb from '../../../platform/subscriptions/db/plan.db.js';
 import orgDb from '../../../platform/organizations/db/org.db.js';
+import billingConfigService from '../../../platform/subscriptions/services/billing-config.service.js';
 
 const PRODUCT_KEY = 'kxtill';
-
-// ============================================================
-// PAYMENT SETTINGS (move to platform settings later)
-// ============================================================
-
-const PAYMENT = {
-  paybill: null,
-  accountNumberPrefix: 'KXBYTE-KXTILL-',
-  tillNumber: null,            
-  mpesaPhone: '0768610613',    
-  bankName: 'I&M Bank',
-  bankAccount: '00108456156150',
-  bankAccountName: 'VINCENT KIPCHIRCHIR',
-  contactEmail: 'admin@kxbyte.co.ke',
-  contactPhone: '+254768610613',
-};
 
 // ============================================================
 // ACCESS MATRIX — what works at each status
@@ -70,10 +55,7 @@ const ACCESS = {
     ],
   },
   EXPIRED: {
-    included: [
-      'Login',
-      'View your account and billing',
-    ],
+    included: ['Login', 'View your account and billing'],
     restricted: [
       'Point of Sale',
       'Sales history',
@@ -106,13 +88,17 @@ function addDays(date, days) {
   return new Date(new Date(date).getTime() + days * 86400000);
 }
 
-function buildWhatHappensNext(status, sub) {
+function dayWord(n) {
+  return `${n} day${n === 1 ? '' : 's'}`;
+}
+
+function buildWhatHappensNext(status, sub, cfg) {
   if (status === 'TRIAL') {
     const graceStart = addDays(sub.trialEnd, 0);
-    const graceEnd = addDays(sub.trialEnd, 2);
+    const graceEnd = addDays(sub.trialEnd, cfg.graceDays);
     return {
       title: `Your trial ends ${safeDate(sub.trialEnd)}`,
-      body: `After that you have 2 days of read-only access (until ${safeDate(
+      body: `After that you have ${dayWord(cfg.graceDays)} of read-only access (until ${safeDate(
         graceEnd
       )}). Writes are blocked after that unless renewed.`,
       graceStartsAt: graceStart,
@@ -120,10 +106,10 @@ function buildWhatHappensNext(status, sub) {
     };
   }
   if (status === 'ACTIVE') {
-    const graceEnd = addDays(sub.currentPeriodEnd, 2);
+    const graceEnd = addDays(sub.currentPeriodEnd, cfg.graceDays);
     return {
       title: `Your subscription renews on ${safeDate(sub.currentPeriodEnd)}`,
-      body: `If not renewed by then, you get 2 days of read-only access until ${safeDate(
+      body: `If not renewed by then, you get ${dayWord(cfg.graceDays)} of read-only access until ${safeDate(
         graceEnd
       )}, then writes are blocked.`,
       graceStartsAt: sub.currentPeriodEnd,
@@ -165,17 +151,11 @@ function buildWhatHappensNext(status, sub) {
   return { title: '', body: '', graceStartsAt: null, graceEndsAt: null };
 }
 
-function buildAmountInfo({ status, plan, organizationId, lastPayment }) {
-  // Every org gets a unique account reference
-  const accountNumber = `${PAYMENT.accountNumberPrefix}${organizationId.slice(0, 8).toUpperCase()}`;
+function buildAmountInfo({ plan, organizationId, lastPayment, cfg }) {
+  const accountNumber = `${cfg.accountPrefix}${organizationId.slice(0, 8).toUpperCase()}`;
 
-  // Suggested amount:
-  //   - If we have a last payment amount, use that as the suggested renewal
-  //   - Otherwise, fall back to plan price
-  //   - If neither, mark as "custom — contact us"
   const suggestedAmount =
-    lastPayment?.amount ??
-    (plan?.price && plan.price > 0 ? plan.price : null);
+    lastPayment?.amount ?? (plan?.price && plan.price > 0 ? plan.price : null);
 
   const currency = lastPayment?.currency || plan?.currency || 'KES';
 
@@ -191,64 +171,61 @@ function buildAmountInfo({ status, plan, organizationId, lastPayment }) {
   };
 }
 
-function buildHowToPay({ accountNumber, status, suggestedAmount, currency }) {
+function buildHowToPay({ accountNumber, suggestedAmount, currency, cfg }) {
   const amountLine = suggestedAmount
     ? `Amount: ${currency} ${suggestedAmount}`
     : 'Amount: confirm with us on WhatsApp before sending';
 
   let primarySteps;
 
-  if (PAYMENT.paybill) {
-    // Paybill path
+  if (cfg.paybill) {
     primarySteps = [
       'Go to M-Pesa → Lipa na M-Pesa → Pay Bill',
-      `Business Number: ${PAYMENT.paybill}`,
+      `Business Number: ${cfg.paybill}`,
       `Account Number: ${accountNumber}`,
       amountLine,
-      `Confirm and share the M-Pesa code with ${PAYMENT.contactEmail}`,
+      `Confirm and share the M-Pesa code with ${cfg.contactEmail}`,
       'We activate your subscription within 24 hours',
     ];
-  } else if (PAYMENT.tillNumber) {
-    // Till path
+  } else if (cfg.tillNumber) {
     primarySteps = [
       'Go to M-Pesa → Lipa na M-Pesa → Buy Goods',
-      `Till Number: ${PAYMENT.tillNumber}`,
+      `Till Number: ${cfg.tillNumber}`,
       amountLine,
-      `Confirm and share the M-Pesa code with ${PAYMENT.contactEmail}`,
+      `Confirm and share the M-Pesa code with ${cfg.contactEmail}`,
       'We activate your subscription within 24 hours',
     ];
-  } else if (PAYMENT.mpesaPhone) {
-    // Send Money path (your current setup)
+  } else if (cfg.mpesaPhone) {
     primarySteps = [
       'Go to M-Pesa → Send Money',
-      `Phone Number: ${PAYMENT.mpesaPhone}`,
+      `Phone Number: ${cfg.mpesaPhone}`,
       amountLine,
       `Reference: ${accountNumber}`,
-      `Share the M-Pesa confirmation SMS with ${PAYMENT.contactEmail}`,
+      `Share the M-Pesa confirmation SMS with ${cfg.contactEmail}`,
       'We activate your subscription within 24 hours',
     ];
-  } else if (PAYMENT.bankName) {
-    // Bank path (fallback if no mobile channel)
+  } else if (cfg.bankName) {
     primarySteps = [
-      `Bank transfer to ${PAYMENT.bankName}`,
-      `Account Name: ${PAYMENT.bankAccountName}`,
-      `Account Number: ${PAYMENT.bankAccount}`,
+      `Bank transfer to ${cfg.bankName}`,
+      `Account Name: ${cfg.bankAccountName}`,
+      `Account Number: ${cfg.bankAccount}`,
       amountLine,
       `Use Reference: ${accountNumber}`,
-      `Email the transfer confirmation to ${PAYMENT.contactEmail}`,
+      `Email the transfer confirmation to ${cfg.contactEmail}`,
       'We activate your subscription within 24 hours',
     ];
   } else {
-    primarySteps = [
-      `Contact us at ${PAYMENT.contactEmail} to arrange payment`,
-    ];
+    primarySteps = [`Contact us at ${cfg.contactEmail} to arrange payment`];
   }
 
   const alternatives = [];
-  if (PAYMENT.paybill)      alternatives.push(`Paybill: ${PAYMENT.paybill} · A/C ${accountNumber}`);
-  if (PAYMENT.tillNumber)   alternatives.push(`Buy Goods Till: ${PAYMENT.tillNumber}`);
-  if (PAYMENT.mpesaPhone)   alternatives.push(`M-Pesa Send Money: ${PAYMENT.mpesaPhone}`);
-  if (PAYMENT.bankName)     alternatives.push(`Bank: ${PAYMENT.bankName} · A/C ${PAYMENT.bankAccount} · ${PAYMENT.bankAccountName}`);
+  if (cfg.paybill) alternatives.push(`Paybill: ${cfg.paybill} · A/C ${accountNumber}`);
+  if (cfg.tillNumber) alternatives.push(`Buy Goods Till: ${cfg.tillNumber}`);
+  if (cfg.mpesaPhone) alternatives.push(`M-Pesa Send Money: ${cfg.mpesaPhone}`);
+  if (cfg.bankName)
+    alternatives.push(
+      `Bank: ${cfg.bankName} · A/C ${cfg.bankAccount} · ${cfg.bankAccountName}`
+    );
 
   return { steps: primarySteps, alternatives };
 }
@@ -261,6 +238,8 @@ const getBilling = async (organizationId, userId) => {
   const membership = await orgDb.findMembership(userId, organizationId);
   if (!membership) throw new Error('You do not have access to this organization');
 
+  const cfg = await billingConfigService.getConfig();
+
   const status = await subscriptionService.getSubscriptionStatus(organizationId, PRODUCT_KEY);
   if (status.status === 'NONE') throw new Error('No subscription found for this product');
 
@@ -271,19 +250,19 @@ const getBilling = async (organizationId, userId) => {
   const lastPayment = payments.find((p) => p.status === 'COMPLETED');
 
   const access = ACCESS[status.status] || ACCESS.EXPIRED;
-  const whatHappensNext = buildWhatHappensNext(status.status, sub);
+  const whatHappensNext = buildWhatHappensNext(status.status, sub, cfg);
   const amountInfo = buildAmountInfo({
-    status: status.status,
     plan,
     organizationId,
     lastPayment,
+    cfg,
   });
-const howToPay = buildHowToPay({
-  accountNumber: amountInfo.accountNumber,
-  status: status.status,
-  suggestedAmount: amountInfo.suggestedAmount,
-  currency: amountInfo.currency,
-});
+  const howToPay = buildHowToPay({
+    accountNumber: amountInfo.accountNumber,
+    suggestedAmount: amountInfo.suggestedAmount,
+    currency: amountInfo.currency,
+    cfg,
+  });
 
   const phaseStartAt =
     status.status === 'TRIAL' ? sub.trialStart :
@@ -302,7 +281,6 @@ const howToPay = buildHowToPay({
     productName: 'KxTill',
     organizationId,
 
-    // Status
     status: status.status,
     isActive: status.isActive,
     isTrial: status.isTrial,
@@ -311,7 +289,6 @@ const howToPay = buildHowToPay({
     isSuspended: status.status === 'SUSPENDED',
     isCancelled: status.status === 'CANCELLED',
 
-    // Dates
     remainingDays: status.remainingDays,
     phaseStartAt,
     phaseEndsAt,
@@ -324,7 +301,6 @@ const howToPay = buildHowToPay({
     expiredAt: sub.expiredAt,
     nextDueAt: whatHappensNext.graceStartsAt,
 
-    // Plan (optional, may be null if legacy)
     plan: plan
       ? {
           key: plan.key,
@@ -336,22 +312,20 @@ const howToPay = buildHowToPay({
         }
       : null,
 
-    // Behaviour
     whatHappensNext,
     access,
     howToPay,
 
-    // Payment
     payment: {
       ...amountInfo,
-      paybill: PAYMENT.paybill,
-      tillNumber: PAYMENT.tillNumber,
-      mpesaPhone: PAYMENT.mpesaPhone,
-      bankName: PAYMENT.bankName,
-      bankAccount: PAYMENT.bankAccount,
-      bankAccountName: PAYMENT.bankAccountName,
-      contactEmail: PAYMENT.contactEmail,
-      contactPhone: PAYMENT.contactPhone,
+      paybill: cfg.paybill,
+      tillNumber: cfg.tillNumber,
+      mpesaPhone: cfg.mpesaPhone,
+      bankName: cfg.bankName,
+      bankAccount: cfg.bankAccount,
+      bankAccountName: cfg.bankAccountName,
+      contactEmail: cfg.contactEmail,
+      contactPhone: cfg.contactPhone,
     },
   };
 };

@@ -452,6 +452,25 @@ model Payment {
   @@map("payments")
 }
 
+model BillingConfig {
+  id                String   @id @default("singleton")
+  paybill           String?
+  tillNumber        String?
+  mpesaPhone        String?
+  bankName          String?
+  bankAccount       String?
+  bankAccountName   String?
+  contactEmail      String?
+  contactPhone      String?
+  accountPrefix     String   @default("KXBYTE-")
+  graceDays         Int      @default(2)
+  trialDays         Int      @default(21)
+  updatedAt         DateTime @updatedAt
+  updatedById       String?
+
+  @@map("billing_config")
+}
+
 // ============================================================
 // AUDIT LOGS
 // ============================================================

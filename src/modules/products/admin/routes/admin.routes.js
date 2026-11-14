@@ -22,6 +22,11 @@ import permissionDb from '../../../platform/authorization/db/permission.db.js';
 
 import crmRoutes from '../crm/routes/crm.routes.js';
 
+// ============================================================
+// BILLING
+// ============================================================
+import * as billingCtrl from '../controllers/billing.controller.js';
+
 const router = express.Router();
 
 router.use(authMiddleware.authenticate);
@@ -244,6 +249,30 @@ router.post('/subscriptions/:organizationId/:productKey/suspend',
 
 router.post('/subscriptions/:organizationId/:productKey/extend-trial',
   requirePlatformAdmin('admin.subscriptions.setDates'), subs.extendTrial);
+
+// ============================================================
+// BILLING — config + revenue + payments
+// ============================================================
+router.get('/billing/config',
+  requirePlatformAdmin('admin.payments.view'), billingCtrl.getConfig);
+
+router.patch('/billing/config',
+  requirePlatformAdmin('admin.payments.manage'), billingCtrl.updateConfig);
+
+router.get('/billing/summary',
+  requirePlatformAdmin('admin.payments.view'), billingCtrl.getSummary);
+
+router.get('/billing/payments',
+  requirePlatformAdmin('admin.payments.view'), billingCtrl.listPayments);
+
+router.get('/billing/payments/subscription',
+  requirePlatformAdmin('admin.payments.view'), billingCtrl.findSubscription);
+
+router.post('/billing/payments',
+  requirePlatformAdmin('admin.payments.record'), billingCtrl.recordPayment);
+
+router.get('/billing/subscriptions',
+  requirePlatformAdmin('admin.payments.record'), billingCtrl.listSubscriptions);
 
 // ============================================================
 // REVENUE

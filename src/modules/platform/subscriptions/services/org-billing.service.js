@@ -4,23 +4,8 @@ import subscriptionDb from '../db/subscription.db.js';
 import planDb from '../db/plan.db.js';
 import orgDb from '../../organizations/db/org.db.js';
 import subscriptionService from './subscription.service.js';
+import billingConfigService from './billing-config.service.js';
 import prisma from '../../../../database/postgres/prisma.js';
-
-// ============================================================
-// PAYMENT SETTINGS (per-platform; later move to DB)
-// ============================================================
-
-const PAYMENT = {
-  paybill: null,
-  accountNumberPrefix: null,
-  tillNumber: null,
-  mpesaPhone: '0745276898',
-  bankName: 'I&M Bank',
-  bankAccount: '00108456156150',
-  bankAccountName: 'Vincent Kipchirchir',
-  contactEmail: 'admin@kxbyte.co.ke',
-  contactPhone: '+254768610613',
-};
 
 // ============================================================
 // ACCESS MATRIX — generic per status
@@ -66,21 +51,29 @@ function addDays(date, days) {
   return new Date(new Date(date).getTime() + days * 86400000);
 }
 
-function buildWhatHappensNext(status, sub) {
+function dayWord(n) {
+  return `${n} day${n === 1 ? '' : 's'}`;
+}
+
+function accountNumberFor(cfg, productKey, organizationId) {
+  return `${cfg.accountPrefix}${productKey.toUpperCase()}-${organizationId.slice(0, 8).toUpperCase()}`;
+}
+
+function buildWhatHappensNext(status, sub, cfg) {
   if (status === 'TRIAL') {
-    const graceEnd = addDays(sub.trialEnd, 2);
+    const graceEnd = addDays(sub.trialEnd, cfg.graceDays);
     return {
       title: `Your trial ends ${safeDate(sub.trialEnd)}`,
-      body: `After that you have 2 days of read-only access (until ${safeDate(graceEnd)}). Writes are blocked after that unless renewed.`,
+      body: `After that you have ${dayWord(cfg.graceDays)} of read-only access (until ${safeDate(graceEnd)}). Writes are blocked after that unless renewed.`,
       graceStartsAt: sub.trialEnd,
       graceEndsAt: graceEnd,
     };
   }
   if (status === 'ACTIVE') {
-    const graceEnd = addDays(sub.currentPeriodEnd, 2);
+    const graceEnd = addDays(sub.currentPeriodEnd, cfg.graceDays);
     return {
       title: `Your subscription renews on ${safeDate(sub.currentPeriodEnd)}`,
-      body: `If not renewed by then, you get 2 days of read-only access until ${safeDate(graceEnd)}, then writes are blocked.`,
+      body: `If not renewed by then, you get ${dayWord(cfg.graceDays)} of read-only access until ${safeDate(graceEnd)}, then writes are blocked.`,
       graceStartsAt: sub.currentPeriodEnd,
       graceEndsAt: graceEnd,
     };
@@ -110,8 +103,8 @@ function buildWhatHappensNext(status, sub) {
   return { title: '', body: '', graceStartsAt: null, graceEndsAt: null };
 }
 
-function buildAmountInfo({ plan, organizationId, productKey, lastPayment }) {
-  const accountNumber = `${PAYMENT.accountNumberPrefix}${productKey.toUpperCase()}-${organizationId.slice(0, 8).toUpperCase()}`;
+function buildAmountInfo({ plan, organizationId, productKey, lastPayment, cfg }) {
+  const accountNumber = accountNumberFor(cfg, productKey, organizationId);
 
   const suggestedAmount =
     lastPayment?.amount ?? (plan?.price && plan.price > 0 ? plan.price : null);
@@ -129,46 +122,88 @@ function buildAmountInfo({ plan, organizationId, productKey, lastPayment }) {
   };
 }
 
-function buildPaymentInstructions({ accountNumber }) {
-  return {
-    paybill: PAYMENT.paybill,
-    accountNumber,
-    tillNumber: PAYMENT.tillNumber,
-    mpesaPhone: PAYMENT.mpesaPhone,
-    bankName: PAYMENT.bankName,
-    bankAccount: PAYMENT.bankAccount,
-    bankAccountName: PAYMENT.bankAccountName,
-    contactEmail: PAYMENT.contactEmail,
-    contactPhone: PAYMENT.contactPhone,
-    steps: [
+function buildPaymentInstructions({ accountNumber, cfg }) {
+  const steps = [];
+
+  if (cfg.paybill) {
+    steps.push(
       'Go to M-Pesa → Lipa na M-Pesa → Pay Bill',
-      `Business Number: ${PAYMENT.paybill}`,
+      `Business Number: ${cfg.paybill}`,
       `Account Number: ${accountNumber}`,
       'Enter the amount shown',
-      `Confirm and share the M-Pesa code with ${PAYMENT.contactEmail}`,
-      'We activate your subscription within 24 hours',
-    ],
-    alternatives: [
-      PAYMENT.mpesaPhone && `Send Money to: ${PAYMENT.mpesaPhone}`,
-      PAYMENT.bankName && `Bank: ${PAYMENT.bankName} · A/C ${PAYMENT.bankAccount} · ${PAYMENT.bankAccountName}`,
-    ].filter(Boolean),
+      `Confirm and share the M-Pesa code with ${cfg.contactEmail}`,
+      'We activate your subscription within 24 hours'
+    );
+  } else if (cfg.tillNumber) {
+    steps.push(
+      'Go to M-Pesa → Lipa na M-Pesa → Buy Goods',
+      `Till Number: ${cfg.tillNumber}`,
+      'Enter the amount shown',
+      `Confirm and share the M-Pesa code with ${cfg.contactEmail}`,
+      'We activate your subscription within 24 hours'
+    );
+  } else if (cfg.mpesaPhone) {
+    steps.push(
+      'Go to M-Pesa → Send Money',
+      `Phone Number: ${cfg.mpesaPhone}`,
+      `Reference: ${accountNumber}`,
+      'Enter the amount shown',
+      `Share the M-Pesa confirmation SMS with ${cfg.contactEmail}`,
+      'We activate your subscription within 24 hours'
+    );
+  } else if (cfg.bankName) {
+    steps.push(
+      `Bank transfer to ${cfg.bankName}`,
+      `Account Name: ${cfg.bankAccountName}`,
+      `Account Number: ${cfg.bankAccount}`,
+      `Use Reference: ${accountNumber}`,
+      `Email the transfer confirmation to ${cfg.contactEmail}`,
+      'We activate your subscription within 24 hours'
+    );
+  } else {
+    steps.push(`Contact us at ${cfg.contactEmail} to arrange payment`);
+  }
+
+  const alternatives = [];
+  if (cfg.paybill) alternatives.push(`Paybill: ${cfg.paybill} · A/C ${accountNumber}`);
+  if (cfg.tillNumber) alternatives.push(`Buy Goods Till: ${cfg.tillNumber}`);
+  if (cfg.mpesaPhone) alternatives.push(`Send Money to: ${cfg.mpesaPhone}`);
+  if (cfg.bankName)
+    alternatives.push(
+      `Bank: ${cfg.bankName} · A/C ${cfg.bankAccount} · ${cfg.bankAccountName}`
+    );
+
+  return {
+    paybill: cfg.paybill,
+    accountNumber,
+    tillNumber: cfg.tillNumber,
+    mpesaPhone: cfg.mpesaPhone,
+    bankName: cfg.bankName,
+    bankAccount: cfg.bankAccount,
+    bankAccountName: cfg.bankAccountName,
+    contactEmail: cfg.contactEmail,
+    contactPhone: cfg.contactPhone,
+    steps,
+    alternatives,
   };
 }
 
-function buildProductBlock({ sub, plan, productName, organizationId, payments }) {
+function buildProductBlock({ sub, plan, productName, organizationId, payments, cfg }) {
   const status = sub.status;
   const lastPayment = payments.find((p) => p.status === 'COMPLETED');
 
   const access = ACCESS[status] || ACCESS.EXPIRED;
-  const whatHappensNext = buildWhatHappensNext(status, sub);
+  const whatHappensNext = buildWhatHappensNext(status, sub, cfg);
   const amountInfo = buildAmountInfo({
     plan,
     organizationId,
     productKey: sub.productKey,
     lastPayment,
+    cfg,
   });
   const paymentInstructions = buildPaymentInstructions({
     accountNumber: amountInfo.accountNumber,
+    cfg,
   });
 
   const phaseStartAt =
@@ -254,6 +289,8 @@ const getBilling = async (organizationId, userId) => {
   const org = await orgDb.findOrganizationById(organizationId);
   if (!org) throw new Error('Organization not found');
 
+  const cfg = await billingConfigService.getConfig();
+
   const subs = await subscriptionDb.findSubscriptionsByOrganization(organizationId);
 
   const products = await Promise.all(
@@ -263,18 +300,19 @@ const getBilling = async (organizationId, userId) => {
       return buildProductBlock({
         sub,
         plan,
-        productName: null, // TODO: join Product table if you want the display name
+        productName: null,
         organizationId,
         payments,
+        cfg,
       });
     })
   );
 
-  // Summary
-  const nextDueAt = products
-    .map((p) => p.nextDueAt)
-    .filter(Boolean)
-    .sort((a, b) => new Date(a) - new Date(b))[0] || null;
+  const nextDueAt =
+    products
+      .map((p) => p.nextDueAt)
+      .filter(Boolean)
+      .sort((a, b) => new Date(a) - new Date(b))[0] || null;
 
   const activeProductCount = products.filter((p) => p.isActive).length;
 
@@ -307,7 +345,7 @@ const getBilling = async (organizationId, userId) => {
 };
 
 // ============================================================
-// notifyPayment — tenant claims a payment was made
+// notifyPayment
 // ============================================================
 
 const notifyPayment = async (organizationId, userId, payload) => {
@@ -341,7 +379,6 @@ const notifyPayment = async (organizationId, userId, payload) => {
     },
   });
 
-  // Notify admin (non-blocking)
   try {
     const notifications = await import('../../notifications/index.js');
     const org = await orgDb.findOrganizationById(organizationId);
@@ -374,7 +411,7 @@ const notifyPayment = async (organizationId, userId, payload) => {
 };
 
 // ============================================================
-// getTrialBurns — for the caller's org owner
+// getTrialBurns
 // ============================================================
 
 const getTrialBurns = async (organizationId, userId) => {

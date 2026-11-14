@@ -33,7 +33,8 @@ const permissions = [
   { key: 'admin.subscriptions.setDates',  name: 'Set Subscription Dates',  description: 'Edit trial/period/grace dates' },
   { key: 'admin.subscriptions.setStatus', name: 'Set Subscription Status', description: 'Force status changes' },
   { key: 'admin.subscriptions.suspend',   name: 'Suspend Subscription',    description: 'Suspend an active subscription' },
-
+  { key: 'admin.payments.manage', name: 'Manage Billing', description: 'Edit platform payment config' },
+  
   // ============================================================
   // PAYMENTS
   // ============================================================
