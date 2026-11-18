@@ -9,6 +9,21 @@ import audit from '../../audit/index.js';
 import authDb from '../../identity/db/auth.db.js';
 import { sendProductActivatedEmail } from '../../email/index.js';
 
+// ============================================================
+// ACTIVATION HOOKS — modules register callbacks that run after a
+// product is successfully activated. Platform does not know who
+// consumes these; admin/onboarding is one such listener.
+// ============================================================
+
+const activationHooks = [];
+
+export const registerActivationHook = (fn) => {
+  if (typeof fn !== 'function') {
+    throw new Error('registerActivationHook expects a function');
+  }
+  activationHooks.push(fn);
+};
+
 const sendActivationEmail = async ({ userId, organization, response }) => {
   try {
     const user = await authDb.findUserById(userId);
@@ -363,6 +378,16 @@ const activateProductUnlocked = async (organizationId, userId, productKey, verti
     resourceId: product.id,
     metadata: { productKey: product.key, productName: product.name, vertical },
   });
+
+  // Fire activation hooks. Registered modules (e.g. admin/onboarding)
+  // seed their own state. Failures are logged but never block activation.
+  for (const hook of activationHooks) {
+    try {
+      await hook({ organizationId, productKey: product.key, userId });
+    } catch (err) {
+      console.error('[products] Activation hook failed:', err.message);
+    }
+  }
 
   const response = await buildResponse(resultOrgProductId);
   sendActivationEmail({ userId, organization, response });

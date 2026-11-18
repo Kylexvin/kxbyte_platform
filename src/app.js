@@ -256,6 +256,13 @@ export async function initializeProducts() {
       console.log(`Registered ${product.subscription.plans.length} plans for ${product.name}`);
     }
   }
+
+  // Register onboarding activation hook (product-activation → seed onboarding)
+  const { default: onboardingModule } = await import(
+    './modules/products/admin/onboarding/index.js'
+  );
+  onboardingModule.registerOnboardingHook();
+  console.log('[onboarding] activation hook registered');
 }
 
 // ============================================================

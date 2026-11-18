@@ -74,6 +74,13 @@ const permissions = [
   // ============================================================
   { key: 'admin.activities.view',   name: 'View Lead Activities',   description: 'View CRM lead activity timelines' },
   { key: 'admin.activities.create', name: 'Log Lead Activities',    description: 'Log calls, visits, notes against CRM leads' },
+
+  // ============================================================
+  // ONBOARDING
+  // ============================================================
+  { key: 'admin.onboarding.view',   name: 'View Onboarding',   description: 'View customer onboarding progress' },
+  { key: 'admin.onboarding.manage', name: 'Manage Onboarding', description: 'Complete, ignore, reopen tasks, assign owners, create ad-hoc tasks' },
 ];
+
 
 export default permissions;

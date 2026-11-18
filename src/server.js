@@ -4,6 +4,7 @@ import app, { initializeProducts } from './app.js';
 import { startSubscriptionSweep } from './modules/platform/subscriptions/jobs/subscriptionSweep.job.js';
 import { startAuditSweep } from './modules/platform/audit/jobs/auditSweep.job.js';
 import { startPairingSweep } from './modules/platform/identity/jobs/pairingSweep.job.js';
+import { startOnboardingSweep } from './modules/products/admin/onboarding/jobs/onboardingSweep.job.js';
 
 const PORT = process.env.PORT || 5000;
 
@@ -14,6 +15,7 @@ async function startServer() {
     startSubscriptionSweep();
     startAuditSweep();
     startPairingSweep();
+    startOnboardingSweep();
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

@@ -22,6 +22,8 @@ import permissionDb from '../../../platform/authorization/db/permission.db.js';
 
 import crmRoutes from '../crm/routes/crm.routes.js';
 
+import onboardingRoutes from '../onboarding/routes/onboarding.routes.js';
+
 // ============================================================
 // BILLING
 // ============================================================
@@ -308,5 +310,10 @@ router.delete('/products/:key/icon',
 
 router.use('/crm', crmRoutes);
 
+
+// ============================================================
+// ONBOARDING (kxcrm product) - routes
+// ============================================================
+router.use('/onboarding', onboardingRoutes);
 
 export default router;

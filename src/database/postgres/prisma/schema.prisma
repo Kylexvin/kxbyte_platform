@@ -70,6 +70,9 @@ model User {
   leadAssignments         LeadAssignee[]
   assignedLeadAssignments LeadAssignee[] @relation("LeadAssigneeAssignedBy")
 
+  ownedOnboardings       OrganizationOnboarding[] @relation("OnboardingOwner")
+  completedOnboardingTasks OnboardingTask[] @relation("OnboardingTaskCompleter")
+  assignedOnboardingTasks  OnboardingTask[] @relation("OnboardingTaskAssignee")
   @@map("users")
 }
 
@@ -162,6 +165,9 @@ model Organization {
 
   leadActivities LeadActivity[]
   leadAssignees    LeadAssignee[]
+
+  onboardings      OrganizationOnboarding[]
+  onboardingTasks  OnboardingTask[]
 
   @@index([ownerId])
   @@index([isInternal])
@@ -1693,4 +1699,102 @@ model LeadAssignee {
   @@index([organizationId, leadId])
 
   @@map("lead_assignees")
+}
+
+// ============================================================
+// ONBOARDING — admin monitoring of customer onboarding
+// ============================================================
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum OnboardingTaskStatus {
+  PENDING
+  COMPLETED
+  IGNORED
+}
+
+enum OnboardingTaskCategory {
+  ACCOUNT_SETUP
+  CONFIGURATION
+  TRAINING
+  COMMERCIAL
+  ADOPTION
+  HANDOVER
+  GENERAL     // for admin-created ad-hoc tasks
+}
+
+model OrganizationOnboarding {
+  id             String   @id @default(uuid())
+
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  productKey     String   // 'kxtill', 'kxwork', 'kxcrm'
+  templateKey    String   // versioned template id at seed time, e.g. 'kxtill:v1'
+  status         OnboardingStatus @default(NOT_STARTED)
+
+  ownerId        String?  // accountable KXBYTE staff member
+  owner          User?    @relation("OnboardingOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tasks          OnboardingTask[]
+
+  @@unique([organizationId, productKey])
+  @@index([organizationId])
+  @@index([status])
+  @@index([ownerId])
+  @@map("organization_onboardings")
+}
+
+model OnboardingTask {
+  id                     String   @id @default(uuid())
+
+  // Parent onboarding — null for ad-hoc admin tasks that aren't tied to a product
+  onboardingId           String?
+  onboarding             OrganizationOnboarding? @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+
+  // Denormalized for direct per-org queries
+  organizationId         String
+  organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Identity
+  key                    String   // e.g. 'first_sale', or admin-generated uuid for ad-hoc
+  title                  String
+  description            String?
+  category               OnboardingTaskCategory @default(GENERAL)
+
+  // Behaviour
+  source                 String   // 'template' | 'admin'
+  autoCheck              String?  // resolver key, resolved by product's checks service
+  required               Boolean  @default(true)
+
+  // State
+  status                 OnboardingTaskStatus @default(PENDING)
+  dueAt                  DateTime?
+  completedAt            DateTime?
+  assignedToId           String?
+  assignedTo             User?    @relation("OnboardingTaskAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  completedById          String?
+  completedBy            User?    @relation("OnboardingTaskCompleter", fields: [completedById], references: [id], onDelete: SetNull)
+
+  notes                  String?
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([assignedToId])
+  @@index([onboardingId])
+  @@index([status])
+  @@index([dueAt])
+  @@map("onboarding_tasks")
 }
