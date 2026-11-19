@@ -21,11 +21,12 @@ const boolOrUndef = (v) =>
 // LIST
 export const list = async (req, res) => {
   try {
-    const { productKey, ownerId, status, page, limit } = req.query;
+    const { productKey, ownerId, status, search, page, limit } = req.query;
     const result = await onboardingService.listOnboardings({
       productKey,
       ownerId,
       status,
+      search,
       page: Number(page) || 1,
       limit: Number(limit) || 50,
     });
@@ -173,6 +174,15 @@ export const listOrgs = async (req, res) => {
     });
   } catch (err) {
     handleError(res, err, 'admin onboarding listOrgs');
+  }
+};
+
+export const getStats = async (req, res) => {
+  try {
+    const stats = await onboardingService.getOnboardingStats();
+    res.json({ data: stats });
+  } catch (err) {
+    handleError(res, err, 'admin onboarding getStats');
   }
 };
 

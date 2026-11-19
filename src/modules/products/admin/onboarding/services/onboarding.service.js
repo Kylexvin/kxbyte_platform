@@ -240,7 +240,9 @@ const syncAllActive = async () => {
 const listOnboardings = async (filters = {}) => {
   const { productKey, ownerId, status, page = 1, limit = 50 } = filters;
 
-  const where = {};
+  const where = {
+    organization: { isInternal: false, isActive: true, isArchived: false },
+  };
   if (productKey) where.productKey = productKey;
   if (ownerId === 'unassigned') where.ownerId = null;
   else if (ownerId) where.ownerId = ownerId;
@@ -373,6 +375,17 @@ const getOnboarding = async (onboardingId) => {
   };
 };
 
+const getOnboardingStats = async () => {
+  const baseWhere = {
+    organization: { isInternal: false, isActive: true, isArchived: false },
+  };
+  const [total, inProgress, completed] = await Promise.all([
+    prisma.organizationOnboarding.count({ where: baseWhere }),
+    prisma.organizationOnboarding.count({ where: { ...baseWhere, status: 'IN_PROGRESS' } }),
+    prisma.organizationOnboarding.count({ where: { ...baseWhere, status: 'COMPLETED' } }),
+  ]);
+  return { total, inProgress, completed, notStarted: total - inProgress - completed };
+};
 // ============================================================
 // ALL AD-HOC TASKS (for the Tasks tab)
 // ============================================================
@@ -786,8 +799,13 @@ const assignAdHocTask = async (organizationId, taskId, assigneeId, actorId) => {
 
 const listOrgsWithOnboarding = async (filters = {}) => {
   const { search, page = 1, limit = 25 } = filters;
-
-  const where = {};
+ 
+  const where = {
+    isInternal: false,
+    isActive: true,
+    isArchived: false,
+    onboardings: { some: {} },
+  };
   if (search) {
     where.OR = [
       { name: { contains: search, mode: 'insensitive' } },
@@ -851,7 +869,6 @@ const listOrgsWithOnboarding = async (filters = {}) => {
 
   return { data, total, page, limit };
 };
-
 const startOnboarding = async (organizationId, productKey, userId) => {
   const org = await prisma.organization.findUnique({
     where: { id: organizationId },
@@ -896,6 +913,7 @@ export default {
   syncAutoChecksForOnboarding,
   syncAllActive,
   // Read
+  getOnboardingStats,
   listOnboardings,
   getOnboarding,
   listAdHocTasks,

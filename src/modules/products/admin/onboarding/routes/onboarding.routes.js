@@ -27,6 +27,11 @@ router.post(
   ctrl.start
 );
 router.get(
+  '/stats',
+  requirePlatformAdmin('admin.onboarding.view'),
+  ctrl.getStats
+);
+router.get(
   '/:onboardingId',
   requirePlatformAdmin('admin.onboarding.view'),
   ctrl.getOne
