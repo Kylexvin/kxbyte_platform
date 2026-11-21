@@ -123,6 +123,15 @@ const updateProduct = async (req, res) => {
     if (error.message === 'You do not have permission to update products') {
       return res.status(403).json({ error: error.message });
     }
+    if (error.message === 'No valid fields to update') {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.message === 'Unit not found') {
+      return res.status(404).json({ error: error.message });
+    }
+    if (error.code === 'P2002') {
+      return res.status(409).json({ error: 'A unit with that name or abbreviation already exists on this product' });
+    }
     console.error('Update product error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }

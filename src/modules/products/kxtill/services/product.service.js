@@ -91,7 +91,6 @@ const createProduct = async (userId, organizationId, data) => {
         unitType: unit.unitType || 'PACKAGED',
         conversionQty: unit.conversionQty || 1,
         price: unit.price,
-        cost: unit.cost || null,
         allowFractional: unit.allowFractional || false,
         barcode: unit.barcode || null,
       });
@@ -196,8 +195,10 @@ const updateProduct = async (organizationId, userId, productId, data) => {
 
   const hasCoreChanges = Object.keys(updateData).length > 0;
   const hasPharmacyChanges = !!data.pharmacy;
+  const hasUnitChanges =
+    !!data.baseUnit || (Array.isArray(data.units) && data.units.length > 0);
 
-  if (!hasCoreChanges && !hasPharmacyChanges) {
+  if (!hasCoreChanges && !hasPharmacyChanges && !hasUnitChanges) {
     throw new Error('No valid fields to update');
   }
 
@@ -210,6 +211,59 @@ const updateProduct = async (organizationId, userId, productId, data) => {
     product = await productDb.findProductById(productId, organizationId);
     if (!product) {
       throw new Error('Product not found');
+    }
+  }
+
+   // ─── Units: base unit edits + create/update selling units ───
+  // Selling units carry no cost; it is derived from the base unit.
+  if (hasUnitChanges) {
+    const existing = await productDb.findProductById(productId, organizationId);
+    if (!existing) {
+      throw new Error('Product not found');
+    }
+
+    // Base unit (name, price, cost, etc.)
+    if (data.baseUnit && existing.baseUnitId) {
+      const baseData = {};
+      for (const f of ['name', 'abbreviation', 'unitType', 'price', 'cost', 'allowFractional']) {
+        if (data.baseUnit[f] !== undefined) baseData[f] = data.baseUnit[f];
+      }
+      if (Object.keys(baseData).length > 0) {
+        await productDb.updateProductUnit(existing.baseUnitId, baseData);
+      }
+    }
+
+    // Selling units: match by id, fall back to name (covers clients that send no ids)
+    if (Array.isArray(data.units)) {
+      const byId = new Map(existing.units.map((u) => [u.id, u]));
+      const byName = new Map(existing.units.map((u) => [u.name, u]));
+
+      for (const unit of data.units) {
+        const name = unit.name?.trim();
+        const match = unit.id ? byId.get(unit.id) : byName.get(name);
+
+        if (unit.id && !match) {
+          throw new Error('Unit not found');
+        }
+        // Never treat the base unit as a selling unit
+        if (match && match.id === existing.baseUnitId) continue;
+
+        const payload = {
+          name,
+          abbreviation: unit.abbreviation?.trim(),
+          unitType: unit.unitType || 'PACKAGED',
+          conversionQty: unit.conversionQty || 1,
+          price: unit.price,
+          allowFractional: unit.allowFractional || false,
+          ...(unit.barcode !== undefined ? { barcode: unit.barcode || null } : {}),
+        };
+
+        if (match) {
+          await productDb.updateProductUnit(match.id, payload);
+        } else {
+          await productDb.createProductUnit({ productId, ...payload });
+        }
+      }
     }
   }
 
@@ -245,7 +299,11 @@ const updateProduct = async (organizationId, userId, productId, data) => {
     resourceId: completeProduct.id,
     metadata: {
       name: completeProduct.name,
-      updatedFields: [...Object.keys(updateData), ...(hasPharmacyChanges ? ['pharmacy'] : [])],
+            updatedFields: [
+        ...Object.keys(updateData),
+        ...(hasPharmacyChanges ? ['pharmacy'] : []),
+        ...(hasUnitChanges ? ['units'] : []),
+      ],
     },
   });
 
@@ -274,8 +332,6 @@ const getProduct = async (organizationId, userId, productId) => {
 
   return product;
 };
-
-
 
 const deleteProduct = async (organizationId, userId, productId) => {
   const membership = await orgDb.findMembership(userId, organizationId);
