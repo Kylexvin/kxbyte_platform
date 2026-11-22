@@ -225,7 +225,7 @@ const updateProduct = async (organizationId, userId, productId, data) => {
     // Base unit (name, price, cost, etc.)
     if (data.baseUnit && existing.baseUnitId) {
       const baseData = {};
-      for (const f of ['name', 'abbreviation', 'unitType', 'price', 'cost', 'allowFractional']) {
+      for (const f of ['name', 'abbreviation', 'unitType', 'price', 'cost', 'allowFractional', 'barcode']) {
         if (data.baseUnit[f] !== undefined) baseData[f] = data.baseUnit[f];
       }
       if (Object.keys(baseData).length > 0) {
