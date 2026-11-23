@@ -175,7 +175,23 @@ router.get('/dashboard/today-sales-trend', guard, reportController.getTodaySales
 // ============================================================
 // MOBILE ROUTES
 // ============================================================
-router.use('/mobile', guard, mobileRoutes);
+// Push registration and notification read-state must keep working on a
+// lapsed plan so renewal reminders still reach the phone.
+const ALWAYS_ALLOWED_MOBILE = [
+  { method: 'POST', path: /^\/devices\/register$/ },
+  { method: 'DELETE', path: /^\/devices\/[^/]+$/ },
+  { method: 'PATCH', path: /^\/notifications\/[^/]+\/read$/ },
+  { method: 'POST', path: /^\/notifications\/mark-all-read$/ },
+];
+
+const mobileGuard = (req, res, next) => {
+  const allowed = ALWAYS_ALLOWED_MOBILE.some(
+    (r) => r.method === req.method && r.path.test(req.path)
+  );
+  return allowed ? next() : guard(req, res, next);
+};
+
+router.use('/mobile', mobileGuard, mobileRoutes);
 router.get('/inventory/products', guard, productController.listInventoryProducts);
 
 

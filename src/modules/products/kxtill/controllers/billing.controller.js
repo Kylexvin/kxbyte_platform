@@ -7,7 +7,7 @@ export const get = async (req, res) => {
     const { organizationId } = req.params;
     const userId = req.user?.userId;
     const data = await billingService.getBilling(organizationId, userId);
-    res.json({ data });
+    res.json({ data, serverNow: new Date().toISOString() });
   } catch (err) {
     const code = err.message.includes('access') ? 403 : 500;
     res.status(code).json({ error: err.message });
