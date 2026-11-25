@@ -24,8 +24,6 @@ import pharmacyVertical from '../verticals/pharmacy/index.js';
 import mobileRoutes from '../mobile/routes/mobile.routes.js';
 
 
-
-
 const router = express.Router({ mergeParams: true });
 
 router.use(authMiddleware.authenticate);
