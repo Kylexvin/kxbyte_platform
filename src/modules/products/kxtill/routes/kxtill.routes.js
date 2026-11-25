@@ -32,7 +32,6 @@ router.use(authMiddleware.authenticate);
 const guard = subscriptionMiddleware.requireActiveSubscription('kxtill');
 
 
-
 // ============================================================
 // ONBOARDING ROUTES
 // ============================================================
